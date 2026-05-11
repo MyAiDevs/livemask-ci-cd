@@ -1,0 +1,12 @@
+# LiveMask CI/CD Repository - AI Development Rules v3.7
+
+@docs/ai-rules/v3.7/00-Core-Principles.md
+@docs/ai-rules/v3.7/04-Multi-Repo-Linkage.md
+@docs/ai-rules/v3.7/12-Production-Automation-SLO.md
+@docs/ai-rules/v3.7/13-Multi-Repo-Development.md
+
+# CI/CD Specific Focus
+- All workflows must be idempotent and support dry-run where possible.
+- Changes to deployment must consider impact on Backend, NodeAgent, and App repositories.
+- Always reference TASK-XXXX in commit messages and PRs.
+- Prefer GitHub Actions + reusable workflows from central docs when possible.
