@@ -1,0 +1,28 @@
+# Reusable Go Build Workflow for LiveMask
+# Usage:
+# jobs:
+#   build:
+#     uses: sammytan/livemask-ci-cd/.github/workflows/reusable-go-build.yml@main
+#     with:
+#       go-version: '1.23'
+
+name: Reusable Go Build
+
+on:
+  workflow_call:
+    inputs:
+      go-version:
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go-version }}
+      - run: go mod download
+      - run: go build ./...
+      - run: go test ./...
