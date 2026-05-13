@@ -1,0 +1,6 @@
+# Default owner. Replace @sammytan with role teams when they exist.
+* @sammytan
+
+/.github/ @sammytan
+/scripts/ @sammytan
+/docs/ @sammytan
