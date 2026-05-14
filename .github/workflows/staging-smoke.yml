@@ -24,3 +24,16 @@ jobs:
         run: docker compose -f infra/docker-compose.staging.yml up -d
       - name: Smoke
         run: bash scripts/smoke.sh
+
+  notify-lark:
+    needs: [smoke]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Notify Lark
+        env:
+          LARK_BOT_WEBHOOK: ${{ secrets.LARK_BOT_WEBHOOK }}
+          LARK_BOT_SECRET: ${{ secrets.LARK_BOT_SECRET }}
+          WORKFLOW_RESULT: ${{ needs.smoke.result }}
+        run: bash .github/scripts/lark-notify.sh "$WORKFLOW_RESULT"

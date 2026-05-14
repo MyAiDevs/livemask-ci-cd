@@ -14,6 +14,11 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      LARK_BOT_WEBHOOK:
+        required: false
+      LARK_BOT_SECRET:
+        required: false
 
 jobs:
   build:
@@ -33,3 +38,16 @@ jobs:
           file: ${{ inputs.dockerfile }}
           push: ${{ inputs.push }}
           tags: ghcr.io/sammytan/${{ inputs.image-name }}:latest
+
+  notify-lark:
+    needs: [build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Notify Lark
+        env:
+          LARK_BOT_WEBHOOK: ${{ secrets.LARK_BOT_WEBHOOK }}
+          LARK_BOT_SECRET: ${{ secrets.LARK_BOT_SECRET }}
+          WORKFLOW_RESULT: ${{ needs.build.result }}
+        run: bash .github/scripts/lark-notify.sh "$WORKFLOW_RESULT"
