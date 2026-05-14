@@ -7,6 +7,10 @@ on:
       - release-candidate
       - docs-contract-changed
 
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   smoke:
     runs-on:

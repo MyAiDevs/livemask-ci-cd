@@ -20,6 +20,11 @@ on:
       LARK_BOT_SECRET:
         required: false
 
+permissions:
+  actions: read
+  contents: read
+  packages: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,13 +36,13 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ github.token }}
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ inputs.dockerfile }}
           push: ${{ inputs.push }}
-          tags: ghcr.io/sammytan/${{ inputs.image-name }}:latest
+          tags: ghcr.io/myaidevs/${{ inputs.image-name }}:latest
 
   notify-lark:
     needs: [build]
