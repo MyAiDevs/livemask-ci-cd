@@ -1,14 +1,14 @@
 # LiveMask CI/CD - AI Development Rules v3.7
 
 ## Always Start Here (Mandatory Pre-check)
-@docs/ai-rules/v3.7/00-Core-Principles.md
-@docs/ai-rules/v3.7/04-Multi-Repo-Linkage.md
-@docs/ai-rules/v3.7/13-Multi-Repo-Development.md
-@docs/ai-rules/v3.7/16-Task-Completion-Report.md
-@docs/docs/LiveMask_开发任务清单与里程碑_v3.6.md
+@../livemask-docs/ai-rules/v3.7/00-Core-Principles.md
+@../livemask-docs/ai-rules/v3.7/04-Multi-Repo-Linkage.md
+@../livemask-docs/ai-rules/v3.7/13-Multi-Repo-Development.md
+@../livemask-docs/ai-rules/v3.7/16-Task-Completion-Report.md
+@../livemask-docs/docs/development/LiveMask_开发任务清单与里程碑_v3.6.md
 
 ## CI/CD Specific Rules
-@docs/ai-rules/v3.7/12-Production-Automation-SLO.md
+@../livemask-docs/ai-rules/v3.7/12-Production-Automation-SLO.md
 
 ## Multi-Window Development
 This window is for **CI/CD and DevOps**.
@@ -28,7 +28,7 @@ Prefer reusable workflows and keep them maintainable across the organization.
 
 ## Task Completion Report
 When a task or subtask is complete, use the standard completion report from:
-@docs/ai-rules/v3.7/16-Task-Completion-Report.md
+@../livemask-docs/ai-rules/v3.7/16-Task-Completion-Report.md
 
 The report must explicitly say which other repo windows are unlocked for parallel development and which remain blocked.
 
