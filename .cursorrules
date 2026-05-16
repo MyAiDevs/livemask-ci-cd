@@ -12,9 +12,17 @@
 
 ## Multi-Window Development
 This window is for **CI/CD and DevOps**.
+You may use `gh` commands to operate GitHub API, Issues, Actions, `workflow_dispatch`, and `repository_dispatch`.
 Always start from `dev`. If local `dev` does not exist, create it from `origin/dev` or `origin/main`.
+Startup command:
+```bash
+git fetch origin main dev
+git checkout dev
+git pull --ff-only origin dev
+```
 Never implement daily development directly on `main`; `main` is staging/pre-release only.
 Production work must come from a GitHub Release / `v*` tag, not from an ad hoc branch.
+`task-unlocked` is only a development coordination signal; never use it to trigger `livemask-ci-cd`.
 Workflow changes must consider impact on all services (Backend, NodeAgent, App, Admin).
 Prefer reusable workflows and keep them maintainable across the organization.
 
@@ -23,6 +31,8 @@ When a task or subtask is complete, use the standard completion report from:
 @docs/ai-rules/v3.7/16-Task-Completion-Report.md
 
 The report must explicitly say which other repo windows are unlocked for parallel development and which remain blocked.
+
+After a meaningful completion, run task sync from `livemask-docs` with `gh workflow run task-sync.yml --repo MyAiDevs/livemask-docs --ref dev`.
 
 ## DoD Self-Check
 - [ ] Linked to TASK-XXXX
