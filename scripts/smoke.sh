@@ -118,15 +118,17 @@ fi
 # --- Config Center: Redis Cache Check ---
 echo ""
 echo "--- Redis cache: config:client.remote_config ---"
-if command -v redis-cli &>/dev/null; then
-  redis_cache=$(redis-cli -p "${REDIS_PORT:-16379}" GET "config:client.remote_config" 2>/dev/null || true)
+if docker compose -f "${COMPOSE_FILE}" exec -T redis redis-cli ping >/dev/null 2>&1; then
+  redis_cache=$(docker compose -f "${COMPOSE_FILE}" exec -T redis redis-cli GET "config:client.remote_config" 2>/dev/null || true)
   if [[ -n "$redis_cache" ]]; then
     echo "Redis cache hit (payload length: ${#redis_cache})"
   else
-    echo "Redis cache miss or redis-cli unavailable (not a failure)"
+    echo "FAIL: Redis cache config:client.remote_config is empty"
+    cc_failed=1
   fi
 else
-  echo "redis-cli not installed; skip Redis cache check"
+  echo "FAIL: unable to query Redis container with redis-cli"
+  cc_failed=1
 fi
 
 if [[ "$cc_failed" -eq 1 ]]; then
