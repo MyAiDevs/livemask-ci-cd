@@ -13,6 +13,7 @@ fi
 
 env_file=""
 compose_file="${REPO_DIR}/infra/docker-compose.local.yml"
+runtime_mode="local"
 services="backend"
 with_deps=true
 auto_reload=false
@@ -32,7 +33,7 @@ Options:
   --env-file FILE          Load independent runtime config file.
   --compose FILE           Compose file to use. Defaults to infra/docker-compose.local.yml.
   --mode local|runtime     local=source-mounted containers, runtime=image deployment.
-  --services LIST          Comma-separated: backend,admin,nodeagent,all.
+  --services LIST          Comma-separated: backend,admin,website,app,nodeagent,all.
   --no-deps                Do not start internal PostgreSQL/Redis containers.
   --auto-reload            Backend hot reload in local mode.
   --pull                   Pull images before start.
@@ -56,8 +57,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --mode)
       case "$2" in
-        local) compose_file="${REPO_DIR}/infra/docker-compose.local.yml" ;;
-        runtime) compose_file="${REPO_DIR}/infra/docker-compose.runtime.yml" ;;
+        local)
+          runtime_mode="local"
+          compose_file="${REPO_DIR}/infra/docker-compose.local.yml"
+          ;;
+        runtime)
+          runtime_mode="runtime"
+          compose_file="${REPO_DIR}/infra/docker-compose.runtime.yml"
+          ;;
         *)
           echo "Unknown mode: $2" >&2
           exit 2
@@ -116,10 +123,22 @@ for service in "${selected_services[@]}"; do
     all)
       add_profile backend
       add_profile admin
+      add_profile website
+      if [[ "${runtime_mode}" == "local" ]]; then
+        add_profile app
+      fi
       add_profile nodeagent
-      service_args+=(backend admin nodeagent)
+      service_args+=(backend admin website)
+      if [[ "${runtime_mode}" == "local" ]]; then
+        service_args+=(app)
+      fi
+      service_args+=(nodeagent)
       ;;
-    backend|admin|nodeagent)
+    backend|admin|website|app|nodeagent)
+      if [[ "${service}" == "app" && "${runtime_mode}" != "local" ]]; then
+        echo "Service 'app' is only supported in local mode. Use release artifacts for production app distribution." >&2
+        exit 2
+      fi
       add_profile "${service}"
       service_args+=("${service}")
       ;;
@@ -169,6 +188,15 @@ case "${command}" in
     echo
     echo "Backend health:"
     curl -fsS "http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT:-18080}/api/v1/health" 2>/dev/null || echo "backend health unavailable"
+    echo
+    echo "Admin:"
+    curl -fsS -o /dev/null -w "HTTP %{http_code}\n" "http://127.0.0.1:${LIVEMASK_ADMIN_PORT:-3001}/login" 2>/dev/null || echo "admin unavailable"
+    echo
+    echo "Website:"
+    curl -fsS -o /dev/null -w "HTTP %{http_code}\n" "http://127.0.0.1:${LIVEMASK_WEBSITE_PORT:-3002}/" 2>/dev/null || echo "website unavailable"
+    echo
+    echo "App web preview:"
+    curl -fsS -o /dev/null -w "HTTP %{http_code}\n" "http://127.0.0.1:${LIVEMASK_APP_WEB_PORT:-3003}/" 2>/dev/null || echo "app web preview unavailable"
     echo
     echo "NodeAgent status:"
     curl -fsS "http://127.0.0.1:${LIVEMASK_NODEAGENT_PORT:-19090}/config/status" 2>/dev/null || echo "nodeagent status unavailable"

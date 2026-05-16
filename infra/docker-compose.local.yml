@@ -32,7 +32,7 @@ services:
       start_period: 5s
 
   backend:
-    image: ${BACKEND_GO_IMAGE:-golang:1.22-alpine}
+    image: ${BACKEND_GO_IMAGE:-golang:1.25-alpine}
     working_dir: /workspace/livemask-backend
     restart: unless-stopped
     command: ["sh", "-lc", "${BACKEND_COMMAND:-/usr/local/go/bin/go run .}"]
@@ -61,7 +61,7 @@ services:
     profiles: ["admin"]
     working_dir: /workspace/livemask-admin
     restart: unless-stopped
-    command: ["sh", "-lc", "npm install && npm run dev -- --hostname 0.0.0.0 --port 3000"]
+    command: ["sh", "-lc", "npm install --no-audit --no-fund || (rm -rf node_modules && npm install --no-audit --no-fund); npm run dev -- --hostname 0.0.0.0 --port 3000"]
     environment:
       BACKEND_INTERNAL_URL: "http://backend:8080"
       NEXT_TELEMETRY_DISABLED: "1"
@@ -70,6 +70,39 @@ services:
     volumes:
       - ../../livemask-admin:/workspace/livemask-admin
       - livemask-local-admin-node-modules:/workspace/livemask-admin/node_modules
+    depends_on:
+      - backend
+
+  website:
+    image: ${WEBSITE_NODE_IMAGE:-node:22-alpine}
+    profiles: ["website"]
+    working_dir: /workspace/livemask-website
+    restart: unless-stopped
+    command: ["sh", "-lc", "npm install --no-audit --no-fund || (rm -rf node_modules && npm install --no-audit --no-fund); npm run dev -- --host 0.0.0.0 --port 5173"]
+    environment:
+      VITE_API_BASE_URL: "http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
+    ports:
+      - "${LIVEMASK_WEBSITE_PORT:-3002}:5173"
+    volumes:
+      - ../../livemask-website:/workspace/livemask-website
+      - livemask-local-website-node-modules:/workspace/livemask-website/node_modules
+    depends_on:
+      - backend
+
+  app:
+    image: ${APP_FLUTTER_IMAGE:-ghcr.io/cirruslabs/flutter:stable}
+    profiles: ["app"]
+    working_dir: /workspace/livemask-app
+    restart: unless-stopped
+    command: ["sh", "-lc", "flutter config --enable-web && flutter pub get && flutter run -d web-server --web-hostname 0.0.0.0 --web-port 8080"]
+    environment:
+      LIVEMASK_API_BASE_URL: "http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
+      PUB_CACHE: /workspace/.cache/pub
+    ports:
+      - "${LIVEMASK_APP_WEB_PORT:-3003}:8080"
+    volumes:
+      - ../../livemask-app:/workspace/livemask-app
+      - livemask-local-flutter-cache:/workspace/.cache
     depends_on:
       - backend
 
@@ -103,4 +136,6 @@ volumes:
   livemask-local-postgres:
   livemask-local-go-cache:
   livemask-local-admin-node-modules:
+  livemask-local-website-node-modules:
+  livemask-local-flutter-cache:
   livemask-local-nodeagent-state:
