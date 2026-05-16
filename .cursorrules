@@ -7,6 +7,19 @@
 @../livemask-docs/ai-rules/v3.7/16-Task-Completion-Report.md
 @../livemask-docs/docs/development/LiveMask_开发任务清单与里程碑_v3.6.md
 
+## Mandatory Task / Repository Match Gate
+Before writing any file, confirm the current TASK explicitly includes
+`livemask-ci-cd` as primary/affected repository or this CI/CD window is named in
+the Cursor handoff. If it does not match, stop and report:
+
+```text
+BLOCKED: current repository does not match TASK scope.
+Current repo: livemask-ci-cd
+Task: <TASK-ID>
+Expected repos: <list from TASK>
+No files changed.
+```
+
 ## CI/CD Specific Rules
 @../livemask-docs/ai-rules/v3.7/12-Production-Automation-SLO.md
 
