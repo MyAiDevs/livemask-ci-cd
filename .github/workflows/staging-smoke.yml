@@ -25,9 +25,12 @@ jobs:
           docker --version
           docker compose version
       - name: Start staging
-        run: docker compose -f infra/docker-compose.staging.yml up -d
+        run: docker compose -f infra/docker-compose.staging.yml up -d --build
       - name: Smoke
         run: bash scripts/smoke.sh
+      - name: Stop staging
+        if: always()
+        run: docker compose -f infra/docker-compose.staging.yml down --remove-orphans
 
   notify-lark:
     needs: [smoke]
@@ -40,5 +43,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           LARK_BOT_WEBHOOK: ${{ secrets.LARK_BOT_WEBHOOK }}
           LARK_BOT_SECRET: ${{ secrets.LARK_BOT_SECRET }}
-          WORKFLOW_RESULT: ${{ needs.smoke.result }}
+          WORKFLOW_RESULT: >-
+            ${{
+              contains(needs.*.result, 'failure') && 'failure'
+              || contains(needs.*.result, 'cancelled') && 'cancelled'
+              || 'success'
+            }}
         run: bash .github/scripts/lark-notify.sh "$WORKFLOW_RESULT"
