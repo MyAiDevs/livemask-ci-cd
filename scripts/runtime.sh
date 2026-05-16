@@ -195,9 +195,11 @@ case "${command}" in
     echo "Website:"
     curl -fsS -o /dev/null -w "HTTP %{http_code}\n" "http://127.0.0.1:${LIVEMASK_WEBSITE_PORT:-3002}/" 2>/dev/null || echo "website unavailable"
     echo
-    echo "App web preview:"
-    curl -fsS -o /dev/null -w "HTTP %{http_code}\n" "http://127.0.0.1:${LIVEMASK_APP_WEB_PORT:-3003}/" 2>/dev/null || echo "app web preview unavailable"
-    echo
+    if [[ "${runtime_mode}" == "local" ]]; then
+      echo "App web preview:"
+      curl -fsS -o /dev/null -w "HTTP %{http_code}\n" "http://127.0.0.1:${LIVEMASK_APP_WEB_PORT:-3003}/" 2>/dev/null || echo "app web preview unavailable"
+      echo
+    fi
     echo "NodeAgent status:"
     curl -fsS "http://127.0.0.1:${LIVEMASK_NODEAGENT_PORT:-19090}/config/status" 2>/dev/null || echo "nodeagent status unavailable"
     echo
