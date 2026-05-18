@@ -37,6 +37,12 @@ jobs:
         run: docker compose -f infra/docker-compose.staging.yml up -d --build
       - name: Smoke
         run: bash scripts/smoke.sh
+      - name: Node full-link smoke (TASK-CICD-NODE-001)
+        run: bash scripts/node-smoke.sh
+      - name: Billing/Device full-link smoke (TASK-CICD-BILLING-001)
+        run: bash scripts/billing-smoke.sh
+      - name: Connect Session full-link smoke (TASK-CICD-CONNECT-001)
+        run: bash scripts/connect-smoke.sh
       - name: Stop staging
         if: always()
         run: docker compose -f infra/docker-compose.staging.yml down --remove-orphans
