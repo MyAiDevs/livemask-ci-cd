@@ -33,7 +33,7 @@ Options:
   --env-file FILE          Load independent runtime config file.
   --compose FILE           Compose file to use. Defaults to infra/docker-compose.local.yml.
   --mode local|runtime     local=source-mounted containers, runtime=image deployment.
-  --services LIST          Comma-separated: backend,admin,website,nodeagent,all.
+  --services LIST          Comma-separated: backend,admin,website,nodeagent,job-service,all.
   --no-deps                Do not start internal PostgreSQL/Redis containers.
   --auto-reload            Backend hot reload in local mode.
   --pull                   Pull images before start.
@@ -42,6 +42,18 @@ Examples:
   bash scripts/runtime.sh start --mode local --services all
   bash scripts/runtime.sh start --mode runtime --env-file infra/env/production.env --services backend,admin --no-deps
   bash scripts/runtime.sh restart --mode runtime --env-file infra/env/staging.env --services all
+EOF
+}
+
+print_local_urls() {
+  cat <<EOF
+Fixed local URLs:
+  Backend   http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT:-18080}
+  Admin     http://127.0.0.1:${LIVEMASK_ADMIN_PORT:-3001}
+  Website   http://127.0.0.1:${LIVEMASK_WEBSITE_PORT:-3002}
+  App Web   http://127.0.0.1:${LIVEMASK_APP_WEB_PORT:-3003}
+  NodeAgent http://127.0.0.1:${LIVEMASK_NODEAGENT_PORT:-19090}
+  JobSvc    http://127.0.0.1:${LIVEMASK_JOB_SERVICE_PORT:-19191}
 EOF
 }
 
@@ -125,14 +137,15 @@ for service in "${selected_services[@]}"; do
       add_profile admin
       add_profile website
       add_profile nodeagent
+      add_profile job-service
       service_args+=(backend admin website)
-      service_args+=(nodeagent)
+      service_args+=(nodeagent job-service)
       ;;
     app)
-      echo "Service 'app' is not started by Docker runtime. Use livemask-docs/scripts/local-dev.sh --app to run Flutter locally." >&2
+      echo "Service 'app' is not started by Docker runtime. Use livemask-app/scripts/local-app.sh to run Flutter locally." >&2
       exit 2
       ;;
-    backend|admin|website|nodeagent)
+    backend|admin|website|nodeagent|job-service)
       add_profile "${service}"
       service_args+=("${service}")
       ;;
@@ -178,7 +191,9 @@ case "${command}" in
     compose_base up -d --force-recreate "${service_args[@]}"
     ;;
   status)
-    compose_base ps
+    compose_base ps -a
+    echo
+    print_local_urls
     echo
     echo "Backend health:"
     curl -fsS "http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT:-18080}/api/v1/health" 2>/dev/null || echo "backend health unavailable"
@@ -194,6 +209,9 @@ case "${command}" in
     echo
     echo "NodeAgent status:"
     curl -fsS "http://127.0.0.1:${LIVEMASK_NODEAGENT_PORT:-19090}/config/status" 2>/dev/null || echo "nodeagent status unavailable"
+    echo
+    echo "Job Service health:"
+    curl -fsS "http://127.0.0.1:${LIVEMASK_JOB_SERVICE_PORT:-19191}/healthz" 2>/dev/null || echo "job service health unavailable"
     echo
     ;;
   pull)

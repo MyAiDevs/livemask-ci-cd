@@ -133,6 +133,28 @@ services:
     depends_on:
       - backend
 
+  job-service:
+    image: ${JOB_SERVICE_GO_IMAGE:-golang:1.25-alpine}
+    profiles: ["job-service"]
+    working_dir: /workspace/livemask-job-service
+    restart: unless-stopped
+    command: ["sh", "-lc", "/usr/local/go/bin/go run ./cmd/job-service"]
+    environment:
+      PORT: "19191"
+      JOB_SERVICE_MODE: "${JOB_SERVICE_MODE:-local}"
+      BACKEND_INTERNAL_URL: "http://backend:8080"
+      GOPROXY: "${GOPROXY:-https://goproxy.cn,direct}"
+      GOCACHE: /workspace/.cache/go-build
+      GOMODCACHE: /workspace/.cache/go/pkg/mod
+      PATH: /usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    ports:
+      - "${LIVEMASK_JOB_SERVICE_PORT:-19191}:19191"
+    volumes:
+      - ../../livemask-job-service:/workspace/livemask-job-service
+      - livemask-local-go-cache:/workspace/.cache
+    depends_on:
+      - backend
+
 volumes:
   livemask-local-postgres:
   livemask-local-go-cache:

@@ -1,6 +1,64 @@
 # livemask-ci-cd
 LiveMask CI/CD pipelines, GitHub Actions workflows, deployment automation, infrastructure as code, and multi-repo coordination scripts
 
+## Local Dev Runtime
+
+Use `scripts/local-dev.sh` for the long-lived local development runtime. It
+wraps `scripts/runtime.sh` with the local compose stack (`livemask-local`) and
+defaults to all local services.
+
+The local dev ports are fixed by `scripts/local-dev.sh` so every Cursor/Codex
+window uses the same entrypoints:
+
+| Service | URL / port |
+| --- | --- |
+| Backend | `http://127.0.0.1:18080` |
+| Admin | `http://127.0.0.1:3001` |
+| Website | `http://127.0.0.1:3002` |
+| App Web | `http://127.0.0.1:3003` |
+| NodeAgent | `http://127.0.0.1:19090` |
+| Postgres | `127.0.0.1:15432` |
+| Redis | `127.0.0.1:16379` |
+
+```bash
+bash scripts/local-dev.sh start
+bash scripts/local-dev.sh status
+```
+
+After a repo task is completed and pushed, refresh the running local service
+without stopping the whole local stack:
+
+```bash
+bash scripts/local-dev.sh sync --services backend
+bash scripts/local-dev.sh sync --services backend,nodeagent
+bash scripts/local-dev.sh sync --services admin,website
+bash scripts/local-dev.sh sync --services all
+```
+
+`sync` pulls clean sibling repos with `git pull --ff-only origin dev` and then
+recreates only the selected Docker services with `docker compose up -d`. It does
+not run `docker compose down`. If a repo has local/Cursor changes, the pull is
+skipped so those changes are not overwritten.
+
+Use this after any repo task that changes a locally running service:
+
+| Repo | Local service refresh |
+| --- | --- |
+| `livemask-backend` | `bash scripts/local-dev.sh sync --services backend` |
+| `livemask-nodeagent` | `bash scripts/local-dev.sh sync --services nodeagent` |
+| `livemask-job-service` | `bash scripts/local-dev.sh sync --services job-service` |
+| `livemask-admin` | `bash scripts/local-dev.sh sync --services admin` |
+| `livemask-website` | `bash scripts/local-dev.sh sync --services website` |
+| multiple services | `bash scripts/local-dev.sh sync --services backend,admin,website,nodeagent,job-service` |
+
+`livemask-app` is not managed by Docker. Use `livemask-app/scripts/local-app.sh`
+for Flutter build/run refresh.
+
+The local runtime is persistent by default. Do not run `stop`, `down`,
+`restart`, `docker compose down`, or process-kill cleanup unless the user
+explicitly asks for that action. Staging smoke tests must use their isolated
+staging compose stack and must not affect `livemask-local`.
+
 ## Staging Smoke
 
 The `Staging Smoke` workflow runs on the `livemask-staging` organization runner

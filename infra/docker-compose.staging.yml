@@ -72,6 +72,25 @@ services:
     networks:
       - livemask-staging
 
+  job-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.jobservice
+      args:
+        JOB_SERVICE_REPO_URL: ${JOB_SERVICE_REPO_URL:-https://github.com/MyAiDevs/livemask-job-service.git}
+        JOB_SERVICE_REF: ${JOB_SERVICE_REF:-dev}
+    restart: unless-stopped
+    ports:
+      - "${LIVEMASK_JOB_SERVICE_PORT:-19191}:19191"
+    environment:
+      PORT: "19191"
+      JOB_SERVICE_MODE: "staging"
+      BACKEND_INTERNAL_URL: "http://backend:8080"
+    depends_on:
+      - backend
+    networks:
+      - livemask-staging
+
 networks:
   livemask-staging:
     driver: bridge

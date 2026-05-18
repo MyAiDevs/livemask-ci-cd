@@ -384,6 +384,21 @@ else
 fi
 
 echo ""
+echo "=== Smoke: Job Service (TASK-CICD-JOBS-001) ==="
+if bash "${SCRIPT_DIR}/jobs-smoke.sh" 2>&1; then
+  echo "Job service smoke PASSED."
+else
+  jobs_rc=$?
+  echo ""
+  echo "=== Job Service Smoke FAILED ==="
+  echo "--- docker compose ps ---"
+  docker compose -f "${COMPOSE_FILE}" ps 2>/dev/null || true
+  echo "--- docker compose logs job-service (last 100) ---"
+  docker compose -f "${COMPOSE_FILE}" logs job-service --tail=100 2>/dev/null || true
+  exit ${jobs_rc}
+fi
+
+echo ""
 echo "=== Smoke: GeoIP Credentials (TASK-CICD-GEOIP-CREDENTIALS-001) ==="
 if bash "${SCRIPT_DIR}/geoip-credentials-smoke.sh" 2>&1; then
   echo "GeoIP credentials smoke PASSED."
@@ -399,4 +414,4 @@ else
 fi
 
 echo ""
-echo "Smoke PASS: full stack (health + config center + auth/rbac + node agent + billing/devices + connect session + content system + geoip + geoip-credentials)"
+echo "Smoke PASS: full stack (health + config center + auth/rbac + node agent + billing/devices + connect session + content system + geoip + job-service + geoip-credentials)"

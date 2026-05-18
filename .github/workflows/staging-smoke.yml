@@ -47,6 +47,8 @@ jobs:
         run: bash scripts/geoip-smoke.sh
       - name: GeoIP Credentials smoke (TASK-CICD-GEOIP-CREDENTIALS-001)
         run: bash scripts/geoip-credentials-smoke.sh
+      - name: Job Service smoke (TASK-CICD-JOBS-001)
+        run: bash scripts/jobs-smoke.sh
       - name: Stop staging
         if: always()
         run: docker compose -f infra/docker-compose.staging.yml down --remove-orphans
