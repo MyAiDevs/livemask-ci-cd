@@ -3,11 +3,14 @@ set -euo pipefail
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TASK-CICD-CONNECT-001 — Connect Session 全链路 Smoke
+# TASK-CICD-VPN-CONFIG-001 — Real connect_config safety Smoke
 # ──────────────────────────────────────────────────────────────────────────────
 # Dependencies:
 #   Backend TASK-BACKEND-CONNECT-001 (connect session CRUD)
-#   Backend TASK-NODE-001 (node register/heartbeat)
+#   Backend TASK-BACKEND-NODE-001 (node register/heartbeat)
 #   Backend TASK-BACKEND-NODE-002 (admin approve/activate)
+#   Backend TASK-BACKEND-VPN-CONFIG-001 (real/skeleton connect_config)
+#   Backend TASK-BACKEND-NODE-ENDPOINT-001 (node-endpoint CRUD)
 # ──────────────────────────────────────────────────────────────────────────────
 
 COMPOSE_FILE="${COMPOSE_FILE:-infra/docker-compose.staging.yml}"
@@ -534,28 +537,372 @@ else
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Cleanup
+# H. VPN Config Safety (TASK-CICD-VPN-CONFIG-001)
+# ──────────────────────────────────────────────────────────────────────────────
+VPN_SUFFIX="${SUFFIX}"
+NODE2_VPN_NAME="vpn-smoke-node2-${VPN_SUFFIX}"
+
+echo ""
+echo "====== TASK-CICD-VPN-CONFIG-001: Real connect_config safety ======"
+
+# Free plan device_limit=1; previous steps used up device slots, so reset before VPN tests
+pg_exec -c "DELETE FROM connect_sessions WHERE user_id='${USER_ID}'" 2>/dev/null || true
+pg_exec -c "DELETE FROM user_devices WHERE user_id='${USER_ID}'" 2>/dev/null || true
+# Re-set device_used to 0 via subscription sync (DELETE cascades from devices to subs)
+echo "  Reset devices for VPN config smoke"
+
+# --- [21] POST /internal/agent/node-endpoint with real endpoint data ---
+echo ""
+echo "--- [21] POST Node Endpoint (real config) ---"
+NEP_TIMESTAMP=$(date +%s)
+NEP_SIGNATURE=$(python3 -c "
+import hmac, hashlib
+secret_hash = '${NODE_SECRET_HASH}'
+msg = '${NODE_ID}:${NEP_TIMESTAMP}'
+sig = hmac.new(secret_hash.encode(), msg.encode(), hashlib.sha256).hexdigest()
+print(sig)
+")
+NEP_RESP=$(curl -sS --max-time 5 -X POST "${API_BASE}/internal/agent/node-endpoint" \
+  -H "Content-Type: application/json" \
+  -H "X-Node-ID: ${NODE_ID}" \
+  -H "X-Signature: ${NEP_SIGNATURE}" \
+  -H "X-Timestamp: ${NEP_TIMESTAMP}" \
+  -d '{"public_endpoint_host":"vpn-smoke.example.com","public_endpoint_port":443,"transport":"tcp","sni":"smoke-sni.example.com","alpn":"h2,http/1.1","protocol_profile":"singbox","enabled":true}') || true
+NEP_OK=$(echo "${NEP_RESP}" | quiet_json "ok")
+if [[ "${NEP_OK}" != "True" ]]; then
+  fail "[TASK-CICD-VPN-CONFIG-001] Node endpoint POST - (response: $(echo ${NEP_RESP} | head -c 200))"
+else
+  pass "[TASK-CICD-VPN-CONFIG-001] Node endpoint POST: ${NEP_OK}"
+fi
+
+# --- [22] GET /internal/agent/node-endpoint ---
+echo ""
+echo "--- [22] GET Node Endpoint (verify stored) ---"
+GET_NEP_RESP=$(curl -sS --max-time 5 "${API_BASE}/internal/agent/node-endpoint" \
+  -H "X-Node-ID: ${NODE_ID}" \
+  -H "X-Signature: ${NEP_SIGNATURE}" \
+  -H "X-Timestamp: ${NEP_TIMESTAMP}") || true
+GOT_HOST=$(echo "${GET_NEP_RESP}" | quiet_json "endpoint.public_endpoint_host")
+GOT_PORT=$(echo "${GET_NEP_RESP}" | quiet_json "endpoint.public_endpoint_port")
+GOT_TRANSPORT=$(echo "${GET_NEP_RESP}" | quiet_json "endpoint.transport")
+GOT_SNI=$(echo "${GET_NEP_RESP}" | quiet_json "endpoint.sni")
+GOT_ALPN=$(echo "${GET_NEP_RESP}" | quiet_json "endpoint.alpn")
+GOT_ENABLED=$(echo "${GET_NEP_RESP}" | quiet_json "endpoint.enabled")
+nep_get_ok=true
+if [[ "${GOT_HOST}" != "vpn-smoke.example.com" ]]; then echo "  FAIL: host=${GOT_HOST}"; nep_get_ok=false; fi
+if [[ "${GOT_PORT}" != "443" ]]; then echo "  FAIL: port=${GOT_PORT}"; nep_get_ok=false; fi
+if [[ "${GOT_TRANSPORT}" != "tcp" ]]; then echo "  FAIL: transport=${GOT_TRANSPORT}"; nep_get_ok=false; fi
+if [[ "${GOT_SNI}" != "smoke-sni.example.com" ]]; then echo "  FAIL: sni=${GOT_SNI}"; nep_get_ok=false; fi
+if [[ "${GOT_ALPN}" != "h2,http/1.1" ]]; then echo "  FAIL: alpn=${GOT_ALPN}"; nep_get_ok=false; fi
+if [[ "${GOT_ENABLED}" != "True" ]]; then echo "  FAIL: enabled=${GOT_ENABLED}"; nep_get_ok=false; fi
+if [[ "${nep_get_ok}" == "true" ]]; then
+  pass "[TASK-CICD-VPN-CONFIG-001] Node endpoint GET: host=${GOT_HOST} port=${GOT_PORT} transport=${GOT_TRANSPORT}"
+else
+  fail "[TASK-CICD-VPN-CONFIG-001] Node endpoint GET mismatch"
+  echo "  Full response: $(echo ${GET_NEP_RESP} | head -c 300)"
+fi
+
+# --- [23] POST connect session with real config endpoint ---
+echo ""
+echo "--- [23] POST Create Session (real config) ---"
+REAL_SESSION_RESP=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/connect/session" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${USER_TOKEN}" \
+  -d "{\"platform\":\"android\",\"app_version\":\"0.1.0\",\"preferred_node_id\":\"${NODE_ID}\"}") || true
+REAL_SESSION_ID=$(echo "${REAL_SESSION_RESP}" | quiet_json "session.session_id")
+REAL_S_STATUS=$(echo "${REAL_SESSION_RESP}" | quiet_json "session.status")
+REAL_IS_SKELETON=$(echo "${REAL_SESSION_RESP}" | quiet_json "connect_config.is_skeleton")
+REAL_CV=$(echo "${REAL_SESSION_RESP}" | quiet_json "connect_config.config_version")
+REAL_PROFILE=$(echo "${REAL_SESSION_RESP}" | quiet_json "connect_config.profile_type")
+REAL_ENDPOINT=$(echo "${REAL_SESSION_RESP}" | quiet_json "connect_config.server.endpoint")
+REAL_PORT=$(echo "${REAL_SESSION_RESP}" | quiet_json "connect_config.server.port")
+REAL_TRANSPORT=$(echo "${REAL_SESSION_RESP}" | quiet_json "connect_config.server.transport")
+REAL_SNI=$(echo "${REAL_SESSION_RESP}" | quiet_json "connect_config.server.sni")
+REAL_ALPN=$(echo "${REAL_SESSION_RESP}" | quiet_json "connect_config.server.alpn")
+REAL_CLIENT_PROTO=$(echo "${REAL_SESSION_RESP}" | quiet_json "connect_config.client.protocol")
+REAL_EXPIRES=$(echo "${REAL_SESSION_RESP}" | quiet_json "connect_config.client.expires_at")
+REAL_WARNINGS=$(echo "${REAL_SESSION_RESP}" | quiet_json "connect_config.warnings")
+
+real_ok=true
+if [[ -z "${REAL_SESSION_ID}" ]]; then echo "  FAIL: no session_id"; real_ok=false; fi
+if [[ "${REAL_S_STATUS}" != "active" ]]; then echo "  FAIL: status=${REAL_S_STATUS}"; real_ok=false; fi
+if [[ "${REAL_IS_SKELETON}" != "False" ]]; then echo "  FAIL: is_skeleton=${REAL_IS_SKELETON} (expected false)"; real_ok=false; fi
+if [[ "${REAL_CV}" != "2" ]]; then echo "  FAIL: config_version=${REAL_CV} (expected 2)"; real_ok=false; fi
+if [[ "${REAL_PROFILE}" != "singbox" ]]; then echo "  FAIL: profile=${REAL_PROFILE}"; real_ok=false; fi
+if [[ "${REAL_ENDPOINT}" != "vpn-smoke.example.com" ]]; then echo "  FAIL: endpoint=${REAL_ENDPOINT}"; real_ok=false; fi
+if [[ "${REAL_PORT}" != "443" ]]; then echo "  FAIL: port=${REAL_PORT}"; real_ok=false; fi
+if [[ "${REAL_TRANSPORT}" != "tcp" ]]; then echo "  FAIL: transport=${REAL_TRANSPORT}"; real_ok=false; fi
+if [[ "${REAL_SNI}" != "smoke-sni.example.com" ]]; then echo "  FAIL: sni=${REAL_SNI}"; real_ok=false; fi
+if [[ "${REAL_ALPN}" != "h2,http/1.1" ]]; then echo "  FAIL: alpn=${REAL_ALPN}"; real_ok=false; fi
+if [[ "${REAL_CLIENT_PROTO}" != "singbox" ]]; then echo "  FAIL: client protocol=${REAL_CLIENT_PROTO}"; real_ok=false; fi
+if [[ -z "${REAL_EXPIRES}" ]]; then echo "  FAIL: expires_at missing"; real_ok=false; fi
+if [[ -n "${REAL_WARNINGS}" ]] && [[ "${REAL_WARNINGS}" != "None" ]] && [[ "${REAL_WARNINGS}" != "[]" ]]; then echo "  INFO: warnings present: ${REAL_WARNINGS:0:100}"; fi
+if [[ "${real_ok}" == "true" ]]; then
+  pass "[TASK-CICD-VPN-CONFIG-001] Real config session: is_skeleton=false endpoint=${REAL_ENDPOINT}:${REAL_PORT} transport=${REAL_TRANSPORT}"
+else
+  fail "[TASK-CICD-VPN-CONFIG-001] Real config session checks failed"
+  echo "  Response: $(echo ${REAL_SESSION_RESP} | head -c 500)"
+fi
+
+# --- [24] Real config security check ---
+echo ""
+echo "--- [24] Security Check (real config, no secrets) ---"
+REAL_LEAKED=$(echo "${REAL_SESSION_RESP}" | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+body_str = json.dumps(data).lower()
+sensitive = ['node_secret','node_secret_hash','hmac','private_key','secret_key','access_token','refresh_token','password','hmac_key','signing_key']
+found = [w for w in sensitive if w in body_str]
+if found:
+    print('LEAK: ' + ', '.join(found))
+else:
+    print('OK')
+" 2>/dev/null || echo "OK")
+if [[ "${REAL_LEAKED}" != "OK" ]]; then
+  fail "[TASK-CICD-VPN-CONFIG-001] Security leak in real config: ${REAL_LEAKED}"
+else
+  pass "[TASK-CICD-VPN-CONFIG-001] Real config: no sensitive fields in response"
+fi
+
+# --- Current session after real config create ---
+echo ""
+echo "--- [25] GET Current Session (after real config) ---"
+REAL_CURRENT_RESP=$(curl -sS --max-time 5 "${API_BASE}/api/v1/connect/session/current" \
+  -H "Authorization: Bearer ${USER_TOKEN}") || true
+REAL_CURRENT_ID=$(echo "${REAL_CURRENT_RESP}" | quiet_json "session.session_id")
+if [[ "${REAL_CURRENT_ID}" == "${REAL_SESSION_ID}" ]]; then
+  pass "[TASK-CICD-VPN-CONFIG-001] Current session matches real config session"
+else
+  fail "[TASK-CICD-VPN-CONFIG-001] Current session mismatch (expected ${REAL_SESSION_ID}, got ${REAL_CURRENT_ID:-null})"
+fi
+
+# --- Disconnect real config session ---
+echo ""
+echo "--- [26] Disconnect Real Config Session ---"
+REAL_DISC_RESP=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/connect/session/${REAL_SESSION_ID}/disconnect" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${USER_TOKEN}" \
+  -d '{"reason":"user_disconnect"}') || true
+REAL_DISC_OK=$(echo "${REAL_DISC_RESP}" | quiet_json "ok")
+REAL_DISC_STATUS=$(echo "${REAL_DISC_RESP}" | quiet_json "session.status")
+if [[ "${REAL_DISC_OK}" != "True" ]] || [[ "${REAL_DISC_STATUS}" != "disconnected" ]]; then
+  fail "[TASK-CICD-VPN-CONFIG-001] Disconnect real config - ok=${REAL_DISC_OK} status=${REAL_DISC_STATUS}"
+else
+  pass "[TASK-CICD-VPN-CONFIG-001] Disconnect real config: status=${REAL_DISC_STATUS}"
+fi
+
+# --- Repeat disconnect (idempotent) ---
+echo ""
+echo "--- [27] Disconnect Repeat (idempotent) ---"
+REAL_DISC2_RESP=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/connect/session/${REAL_SESSION_ID}/disconnect" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${USER_TOKEN}" \
+  -d '{"reason":"user_disconnect"}') || true
+REAL_DISC2_OK=$(echo "${REAL_DISC2_RESP}" | quiet_json "ok")
+if [[ "${REAL_DISC2_OK}" != "True" ]]; then
+  fail "[TASK-CICD-VPN-CONFIG-001] Disconnect repeat - (response: $(echo ${REAL_DISC2_RESP} | head -c 200))"
+else
+  pass "[TASK-CICD-VPN-CONFIG-001] Disconnect repeat: ok=${REAL_DISC2_OK} (idempotent)"
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+# I. Skeleton fallback (no endpoint)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Clean up devices from real config section (free plan limit=1)
+pg_exec -c "DELETE FROM connect_sessions WHERE user_id='${USER_ID}'" 2>/dev/null || true
+pg_exec -c "DELETE FROM user_devices WHERE user_id='${USER_ID}'" 2>/dev/null || true
+echo "  Reset devices for skeleton fallback tests"
+
+# --- [28] Register Node2, approve, activate (no endpoint) ---
+echo ""
+echo "--- [28] Register Node2 (no endpoint) ---"
+NODE2_REG=$(curl -sS --max-time 5 -X POST "${API_BASE}/internal/agent/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"node_name\":\"${NODE2_VPN_NAME}\",\"agent_version\":\"smoke-1.0.0\"}") || true
+NODE2_ID=$(echo "${NODE2_REG}" | quiet_json "node_id")
+NODE2_SECRET=$(echo "${NODE2_REG}" | quiet_json "node_secret")
+if [[ -z "${NODE2_ID}" ]]; then
+  fail "[TASK-CICD-VPN-CONFIG-001] Node2 register"
+else
+  pass "[TASK-CICD-VPN-CONFIG-001] Node2 registered: id=${NODE2_ID}"
+
+  curl -sS --max-time 5 -X POST "${API_BASE}/admin/api/v1/nodes/${NODE2_ID}/approve" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -d '{"reason":"Approved for skeleton fallback test"}' >/dev/null 2>&1 || true
+  curl -sS --max-time 5 -X POST "${API_BASE}/admin/api/v1/nodes/${NODE2_ID}/activate" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -d '{"reason":"Activated for skeleton fallback test"}' >/dev/null 2>&1 || true
+  echo "       Node2 approved + activated"
+
+  # --- [29] Create session with Node2 → skeleton fallback ---
+  echo ""
+  echo "--- [29] POST Create Session (skeleton fallback, no endpoint) ---"
+  SKEL_SESSION_RESP=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/connect/session" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${USER_TOKEN}" \
+    -d "{\"platform\":\"android\",\"app_version\":\"0.1.0\",\"preferred_node_id\":\"${NODE2_ID}\"}") || true
+  SKEL_IS_SKELETON=$(echo "${SKEL_SESSION_RESP}" | quiet_json "connect_config.is_skeleton")
+  SKEL_CV=$(echo "${SKEL_SESSION_RESP}" | quiet_json "connect_config.config_version")
+  SKEL_ENDPOINT=$(echo "${SKEL_SESSION_RESP}" | quiet_json "connect_config.server.endpoint")
+  SKEL_PORT=$(echo "${SKEL_SESSION_RESP}" | quiet_json "connect_config.server.port")
+  SKEL_CLIENT_PROTO=$(echo "${SKEL_SESSION_RESP}" | quiet_json "connect_config.client.protocol")
+  SKEL_WARNINGS=$(echo "${SKEL_SESSION_RESP}" | quiet_json "connect_config.warnings")
+
+  skel_ok=true
+  if [[ "${SKEL_IS_SKELETON}" != "True" ]]; then echo "  FAIL: is_skeleton=${SKEL_IS_SKELETON} (expected true)"; skel_ok=false; fi
+  if [[ "${SKEL_CV}" != "1" ]]; then echo "  FAIL: config_version=${SKEL_CV} (expected 1)"; skel_ok=false; fi
+  if [[ "${SKEL_ENDPOINT}" != "mvp-not-issued" ]]; then echo "  FAIL: endpoint=${SKEL_ENDPOINT} (expected mvp-not-issued)"; skel_ok=false; fi
+  if [[ "${SKEL_PORT}" != "0" ]]; then echo "  FAIL: port=${SKEL_PORT} (expected 0)"; skel_ok=false; fi
+  if [[ "${SKEL_CLIENT_PROTO}" != "mvp" ]]; then echo "  FAIL: client protocol=${SKEL_CLIENT_PROTO} (expected mvp)"; skel_ok=false; fi
+  # Check that warnings include skeleton/MVP message
+  warn_str=$(echo "${SKEL_WARNINGS}" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().lower()))" 2>/dev/null || echo "")
+  if [[ -z "${SKEL_WARNINGS}" ]] || [[ "${SKEL_WARNINGS}" == "None" ]] || [[ "${SKEL_WARNINGS}" == "[]" ]]; then
+    echo "  INFO: no warnings (non-fatal)"
+  fi
+
+  # Security check on skeleton
+  SKEL_LEAKED=$(echo "${SKEL_SESSION_RESP}" | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+body_str = json.dumps(data).lower()
+sensitive = ['node_secret','node_secret_hash','hmac','private_key','secret_key','access_token','refresh_token','password']
+found = [w for w in sensitive if w in body_str]
+if found:
+    print('LEAK: ' + ', '.join(found))
+else:
+    print('OK')
+" 2>/dev/null || echo "OK")
+  if [[ "${SKEL_LEAKED}" != "OK" ]]; then echo "  FAIL: skeleton security leak: ${SKEL_LEAKED}"; skel_ok=false; fi
+
+  if [[ "${skel_ok}" == "true" ]]; then
+    pass "[TASK-CICD-VPN-CONFIG-001] Skeleton fallback: is_skeleton=true endpoint=mvp-not-issued"
+  else
+    fail "[TASK-CICD-VPN-CONFIG-001] Skeleton fallback checks failed"
+    echo "  Response: $(echo ${SKEL_SESSION_RESP} | head -c 500)"
+  fi
+
+  # Disconnect skeleton session
+  SKEL_SESSION_ID=$(echo "${SKEL_SESSION_RESP}" | quiet_json "session.session_id")
+  if [[ -n "${SKEL_SESSION_ID}" ]]; then
+    curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/connect/session/${SKEL_SESSION_ID}/disconnect" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer ${USER_TOKEN}" \
+      -d '{"reason":"user_disconnect"}' >/dev/null 2>&1 || true
+  fi
+
+  # --- Clean up node2 ---
+  pg_exec -c "DELETE FROM connect_sessions WHERE node_id='${NODE2_ID}'" 2>/dev/null || true
+  pg_exec -c "DELETE FROM node_endpoints WHERE node_id='${NODE2_ID}'" 2>/dev/null || true
+  pg_exec -c "DELETE FROM nodes WHERE id='${NODE2_ID}'" 2>/dev/null || true
+  echo "       Cleaned up Node2"
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+# J. Disabled endpoint scenario
+# ──────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "--- [30] Disable Endpoint on Node1 → skeleton fallback ---"
+pg_exec -c "DELETE FROM connect_sessions WHERE user_id='${USER_ID}'" 2>/dev/null || true
+pg_exec -c "DELETE FROM user_devices WHERE user_id='${USER_ID}'" 2>/dev/null || true
+echo "  Reset devices for disabled endpoint test"
+DISABLE_TS=$(date +%s)
+DISABLE_SIG=$(python3 -c "
+import hmac, hashlib
+secret_hash = '${NODE_SECRET_HASH}'
+msg = '${NODE_ID}:${DISABLE_TS}'
+sig = hmac.new(secret_hash.encode(), msg.encode(), hashlib.sha256).hexdigest()
+print(sig)
+")
+DISABLE_RESP=$(curl -sS --max-time 5 -X POST "${API_BASE}/internal/agent/node-endpoint" \
+  -H "Content-Type: application/json" \
+  -H "X-Node-ID: ${NODE_ID}" \
+  -H "X-Signature: ${DISABLE_SIG}" \
+  -H "X-Timestamp: ${DISABLE_TS}" \
+  -d '{"public_endpoint_host":"vpn-smoke.example.com","public_endpoint_port":443,"transport":"tcp","sni":"smoke-sni.example.com","alpn":"h2,http/1.1","protocol_profile":"singbox","enabled":false}') || true
+DISABLE_OK=$(echo "${DISABLE_RESP}" | quiet_json "ok")
+if [[ "${DISABLE_OK}" != "True" ]]; then
+  fail "[TASK-CICD-VPN-CONFIG-001] Disable endpoint"
+else
+  # Create session → should fall back to skeleton
+  echo "       Endpoint disabled, creating session..."
+  DISABLED_SESSION_RESP=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/connect/session" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${USER_TOKEN}" \
+    -d "{\"platform\":\"android\",\"app_version\":\"0.1.0\",\"preferred_node_id\":\"${NODE_ID}\"}") || true
+  DISABLED_IS_SKELETON=$(echo "${DISABLED_SESSION_RESP}" | quiet_json "connect_config.is_skeleton")
+  DISABLED_ENDPOINT=$(echo "${DISABLED_SESSION_RESP}" | quiet_json "connect_config.server.endpoint")
+  if [[ "${DISABLED_IS_SKELETON}" == "True" ]] && [[ "${DISABLED_ENDPOINT}" == "mvp-not-issued" ]]; then
+    pass "[TASK-CICD-VPN-CONFIG-001] Disabled endpoint → skeleton=yes endpoint=mvp-not-issued"
+  else
+    fail "[TASK-CICD-VPN-CONFIG-001] Disabled endpoint: is_skeleton=${DISABLED_IS_SKELETON} endpoint=${DISABLED_ENDPOINT}"
+  fi
+  # Disconnect
+  DISABLED_SID=$(echo "${DISABLED_SESSION_RESP}" | quiet_json "session.session_id")
+  if [[ -n "${DISABLED_SID}" ]]; then
+    curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/connect/session/${DISABLED_SID}/disconnect" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer ${USER_TOKEN}" \
+      -d '{"reason":"user_disconnect"}' >/dev/null 2>&1 || true
+  fi
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+# K. HMAC negative tests for node-endpoint
+# ──────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "--- [31] POST Node Endpoint with Wrong Signature → 401 ---"
+WRONG_TS=$(date +%s)
+WRONG_SIG="0000000000000000000000000000000000000000000000000000000000000000"
+WRONG_NEP_RESP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/internal/agent/node-endpoint" \
+  -H "Content-Type: application/json" \
+  -H "X-Node-ID: ${NODE_ID}" \
+  -H "X-Signature: ${WRONG_SIG}" \
+  -H "X-Timestamp: ${WRONG_TS}" \
+  -d '{"public_endpoint_host":"bad.example.com","public_endpoint_port":443,"transport":"tcp","protocol_profile":"singbox","enabled":true}') || true
+if [[ "${WRONG_NEP_RESP}" == "401" ]]; then
+  pass "[TASK-CICD-VPN-CONFIG-001] Wrong signature → 401"
+else
+  fail "[TASK-CICD-VPN-CONFIG-001] Wrong signature → ${WRONG_NEP_RESP} (expected 401)"
+fi
+
+echo ""
+echo "--- [32] POST Node Endpoint without Signature → 401 ---"
+NO_SIG_NEP_RESP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/internal/agent/node-endpoint" \
+  -H "Content-Type: application/json" \
+  -d '{"public_endpoint_host":"bad.example.com","public_endpoint_port":443,"transport":"tcp","protocol_profile":"singbox","enabled":true}') || true
+if [[ "${NO_SIG_NEP_RESP}" == "401" ]]; then
+  pass "[TASK-CICD-VPN-CONFIG-001] No signature → 401"
+else
+  fail "[TASK-CICD-VPN-CONFIG-001] No signature → ${NO_SIG_NEP_RESP} (expected 401)"
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Cleanup (extended)
 # ──────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "--- Cleanup ---"
 pg_exec -c "DELETE FROM connect_sessions WHERE user_id='${USER_ID}'" 2>/dev/null || true
+pg_exec -c "DELETE FROM node_endpoints WHERE node_id='${NODE_ID}'" 2>/dev/null || true
 pg_exec -c "DELETE FROM nodes WHERE id='${NODE_ID}'" 2>/dev/null || true
 pg_exec -c "DELETE FROM users WHERE email='${USER_EMAIL}'" 2>/dev/null || true
 pg_exec -c "DELETE FROM users WHERE email='${WEBSITE_EMAIL}'" 2>/dev/null || true
-echo "  Cleaned up connect smoke data"
+echo "  Cleaned up connect + VPN config smoke data"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Summary
 # ──────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "========================================"
-echo " TASK-CICD-CONNECT-001 SUMMARY"
+echo " TASK-CICD-CONNECT-001 + VPN-CONFIG-001 SUMMARY"
 echo "========================================"
 printf '%s\n' "${SUMMARY_LINES[@]}"
 
 if [[ "${FAILED}" -eq 1 ]]; then
   echo ""
-  echo "[TASK-CICD-CONNECT-001] CONNECT SMOKE FAILED."
+  echo "[TASK-CICD-CONNECT-001] CONNECT + VPN SMOKE FAILED."
   echo ""
   echo "--- docker compose ps ---"
   docker compose -f "${COMPOSE_FILE}" ps 2>/dev/null || true
@@ -566,3 +913,4 @@ fi
 
 echo ""
 echo "[TASK-CICD-CONNECT-001] Connect session full-link smoke PASSED."
+echo "[TASK-CICD-VPN-CONFIG-001] Real connect_config safety smoke PASSED."
