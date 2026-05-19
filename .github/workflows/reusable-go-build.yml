@@ -2,7 +2,7 @@
 # Usage:
 # jobs:
 #   build:
-#     uses: MyAiDevs/livemask-ci-cd/.github/workflows/reusable-go-build.yml@main
+#     uses: MyAiDevs/livemask-ci-cd/.github/workflows/reusable-go-build.yml@dev
 #     with:
 #       go-version: '1.23'
 
