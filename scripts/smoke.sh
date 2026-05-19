@@ -539,6 +539,23 @@ else
 fi
 
 echo ""
+# ── Sentry Config Smoke (TASK-CICD-SENTRY-CONFIG-SMOKE-001) ────────────
+echo ""
+echo "=== Smoke: Sentry Config (TASK-CICD-SENTRY-CONFIG-SMOKE-001) ==="
+if bash "${SCRIPT_DIR}/sentry-config-smoke.sh" 2>&1; then
+  echo "Sentry config smoke PASSED."
+else
+  sentry_cfg_rc=$?
+  echo ""
+  echo "=== Sentry Config Smoke FAILED ==="
+  echo "--- docker compose ps ---"
+  docker compose -f "${COMPOSE_FILE}" ps 2>/dev/null || true
+  echo "--- docker compose logs backend (last 100) ---"
+  docker compose -f "${COMPOSE_FILE}" logs backend --tail=100 2>/dev/null || true
+  exit ${sentry_cfg_rc}
+fi
+
+echo ""
 # ── Observability Smoke (TASK-CICD-OBSERVABILITY-SMOKE-001) ────────────
 echo ""
 echo "=== Smoke: Observability (TASK-CICD-OBSERVABILITY-SMOKE-001) ==="
@@ -592,4 +609,4 @@ else
 fi
 
 echo ""
-echo "Smoke PASS: full stack (health + config center + auth/rbac + node agent + billing/devices + connect session + content system + geoip + job-service + dashboard + protocol-endpoint-rollout + protocol-capability + geoip-credentials + nodeagent-release + website-blog + system-settings + scheduler + app-release + observability + i18n + jobs-hardening)"
+echo "Smoke PASS: full stack (health + config center + auth/rbac + node agent + billing/devices + connect session + content system + geoip + job-service + dashboard + protocol-endpoint-rollout + protocol-capability + geoip-credentials + nodeagent-release + website-blog + system-settings + scheduler + app-release + sentry-config + observability + i18n + jobs-hardening)"

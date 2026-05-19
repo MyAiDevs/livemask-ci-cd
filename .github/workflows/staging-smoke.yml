@@ -63,6 +63,8 @@ jobs:
         run: bash scripts/system-settings-smoke.sh
       - name: App Release smoke (TASK-CICD-APP-RELEASE-001)
         run: bash scripts/app-release-smoke.sh
+      - name: Sentry Config smoke (TASK-CICD-SENTRY-CONFIG-SMOKE-001)
+        run: bash scripts/sentry-config-smoke.sh
       - name: Observability smoke (TASK-CICD-OBSERVABILITY-SMOKE-001)
         run: bash scripts/observability-smoke.sh
       - name: I18n smoke (TASK-CICD-I18N-001)
