@@ -3,13 +3,13 @@ name: Staging Smoke
 on:
   push:
     branches:
-      - main
+      - dev
   workflow_dispatch:
     inputs:
       backend_ref:
-        description: Backend ref to build for staging smoke
+        description: Backend ref to build for smoke. Must be dev.
         required: false
-        default: main
+        default: dev
   repository_dispatch:
     types:
       - staging-promote
@@ -21,12 +21,15 @@ permissions:
 jobs:
   smoke:
     env:
-      BACKEND_REF: ${{ github.event.client_payload.ref || inputs.backend_ref || 'main' }}
+      BACKEND_REF: dev
+      JOB_SERVICE_REF: dev
     runs-on:
       group: livemask-staging
       labels: [self-hosted, linux, livemask, docker, staging]
     steps:
       - uses: actions/checkout@v4
+      - name: Enforce dev-only smoke refs
+        run: bash scripts/validate-dev-ref.sh
       - name: Show runner
         run: |
           hostname

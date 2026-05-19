@@ -53,6 +53,16 @@ After implementation and required validation pass:
 
 Do not report `completed` if the task branch has not been merged into `dev`, if `dev` has not been pushed to `origin/dev`, if validation only passed before the dev merge, or if merge conflicts remain unresolved.
 
+## CI/CD Dev-Only Smoke Rule
+CI/CD acceptance smoke must run from `dev` only. Do not use `task/*`, `codex/*`,
+or feature branch refs as smoke validation evidence. Feature branches may run
+syntax/unit prechecks, but completion requires merge to `dev`, push to
+`origin/dev`, and smoke/build validation against `dev`.
+
+Keep workflow defaults and compose build refs on `dev`. If a workflow accepts a
+ref input, it must reject anything other than `dev` unless it is a production
+release gate validating a `v*` tag.
+
 ## Local Dev Runtime Permanent Rule
 1. `scripts/local-dev.sh` manages the long-lived local development environment.
 2. After any task, keep the local dev runtime running by default.

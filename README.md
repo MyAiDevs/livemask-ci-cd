@@ -65,6 +65,14 @@ The `Staging Smoke` workflow runs on the `livemask-staging` organization runner
 group. It starts `infra/docker-compose.staging.yml` and verifies the staging
 entrypoint with `scripts/smoke.sh`.
 
+Smoke validation is **dev-only**. Do not run acceptance smoke from `task/*`,
+`codex/*`, or any other feature branch. A task branch can run local/unit
+prechecks, but final CI/CD evidence must come after the task branch is merged
+into `dev`, pushed to `origin/dev`, and rebuilt from `dev`.
+
+The workflow and compose defaults set service refs to `dev`. `scripts/validate-dev-ref.sh`
+fails fast if a smoke run tries to use a non-`dev` service ref.
+
 Current default smoke target:
 
 ```text
