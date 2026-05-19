@@ -42,14 +42,18 @@ Prefer reusable workflows and keep them maintainable across the organization.
 ## Mandatory Task Finish / Dev Merge Gate
 A task is not complete while its changes exist only on `task/*`, `codex/*`, or another feature branch.
 
+All task-branch-to-dev merges must use `scripts/dev-merge-guard.sh`. Manual
+`git merge task/*` is forbidden for completion work because it bypasses rescue
+branch creation, integration validation, and fail-closed checks.
+
 After implementation and required validation pass:
 1. Commit the task changes with the `TASK-XXXX` ID.
-2. Switch to `dev` and update from `origin/dev`.
-3. Merge the completed task branch into `dev`.
-4. Resolve conflicts inside the current repository boundary only.
-5. Re-run CI/CD validation on `dev` (`bash -n`, affected smoke scripts, and `git diff --check` at minimum).
-6. Push `dev` to `origin/dev`.
-7. Include task branch commit, dev merge commit, pushed remote ref, and validation evidence in the completion report.
+2. Run:
+   ```bash
+   bash scripts/dev-merge-guard.sh --repo . --task-branch task/<TASK-ID> --task-id <TASK-ID> --push
+   ```
+3. Resolve conflicts only if the guard stops and explicitly reports the conflict.
+4. Include task branch commit, dev merge commit, pushed remote ref, and validation evidence in the completion report.
 
 Do not report `completed` if the task branch has not been merged into `dev`, if `dev` has not been pushed to `origin/dev`, if validation only passed before the dev merge, or if merge conflicts remain unresolved.
 

@@ -54,6 +54,50 @@ Use this after any repo task that changes a locally running service:
 `livemask-app` is not managed by Docker. Use `livemask-app/scripts/local-app.sh`
 for Flutter build/run refresh.
 
+## Dev Merge Guard
+
+All completed task branches must be merged into `dev` through the guarded merge
+script. Do not run ad hoc batch merges such as `for branch in task/*; do git
+merge ...; done`.
+
+Example:
+
+```bash
+bash scripts/dev-merge-guard.sh \
+  --repo ../livemask-admin \
+  --task-branch task/TASK-ADMIN-EXAMPLE-001 \
+  --task-id TASK-ADMIN-EXAMPLE-001 \
+  --push
+```
+
+The guard is fail-closed:
+
+- dirty worktree: stop
+- merge/rebase/cherry-pick in progress: stop
+- missing `origin/dev`: stop
+- task branch without remote backup: stop
+- merge conflict: abort merge and stop
+- validation failure: stop before push
+- no `--push`: stop after integration validation
+
+The guard creates a `rescue/*` branch from `origin/dev`, tests the merge on an
+`integration/*` branch, re-runs validation on `dev`, and only then pushes
+`origin/dev`.
+
+## Branch Protection
+
+Use `scripts/apply-branch-protection.sh` to apply the baseline GitHub branch
+protection for LiveMask `dev` and `main` branches:
+
+```bash
+DRY_RUN=true bash scripts/apply-branch-protection.sh
+bash scripts/apply-branch-protection.sh
+```
+
+The baseline protection disallows force pushes and branch deletion. It does not
+yet require named status checks because some repos still use different check
+names; tighten required checks once each repo has stable green CI on `dev`.
+
 The local runtime is persistent by default. Do not run `stop`, `down`,
 `restart`, `docker compose down`, or process-kill cleanup unless the user
 explicitly asks for that action. Staging smoke tests must use their isolated
