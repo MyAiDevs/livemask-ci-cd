@@ -28,6 +28,11 @@ jobs:
     env:
       BACKEND_REF: dev
       JOB_SERVICE_REF: dev
+      LIVEMASK_STACK_NAME: livemask-smoke
+      LIVEMASK_BACKEND_HTTP_PORT: "28080"
+      LIVEMASK_JOB_SERVICE_PORT: "29191"
+      POSTGRES_PORT: "25432"
+      REDIS_PORT: "26379"
     runs-on:
       group: livemask-staging
       labels: [self-hosted, Linux, livemask, docker, staging]
@@ -56,6 +61,11 @@ jobs:
           whoami
           docker --version
           docker compose version
+          echo "Ephemeral smoke port mapping:"
+          echo "  host 28080 -> backend container 8080"
+          echo "  host 29191 -> job-service container 19191"
+          echo "  host 25432 -> postgres container 5432"
+          echo "  host 26379 -> redis container 6379"
       - name: Checkout backend source into build context
         uses: actions/checkout@v4
         with:

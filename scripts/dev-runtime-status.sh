@@ -58,6 +58,10 @@ COMPOSE_BASENAME="$(basename "${COMPOSE_FILE}")"
 # ============================================================
 HOSTNAME="$(hostname 2>/dev/null || echo 'unknown')"
 UPTIME="$(uptime 2>/dev/null | sed 's/,.*//' || echo 'unknown')"
+BACKEND_PORT="${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
+JOB_PORT="${LIVEMASK_JOB_SERVICE_PORT:-19191}"
+POSTGRES_HOST_PORT="${POSTGRES_PORT:-15432}"
+REDIS_HOST_PORT="${REDIS_PORT:-16379}"
 
 # ============================================================
 # 1. Container status via docker compose ps
@@ -127,13 +131,19 @@ collect_ref() {
   fi
 }
 
-declare -A REF_MAP
-REF_MAP["BACKEND_REF"]="$(collect_ref "BACKEND_REF" "livemask-backend" "dev")"
-REF_MAP["JOB_SERVICE_REF"]="$(collect_ref "JOB_SERVICE_REF" "livemask-job-service" "dev")"
-REF_MAP["ADMIN_REF"]="$(collect_ref "ADMIN_REF" "livemask-admin" "dev")"
-REF_MAP["WEBSITE_REF"]="$(collect_ref "WEBSITE_REF" "livemask-website" "dev")"
-REF_MAP["APP_REF"]="$(collect_ref "APP_REF" "livemask-app" "dev")"
-REF_MAP["NODEAGENT_REF"]="$(collect_ref "NODEAGENT_REF" "livemask-nodeagent" "dev")"
+BACKEND_REF_VALUE="$(collect_ref "BACKEND_REF" "livemask-backend" "dev")"
+JOB_SERVICE_REF_VALUE="$(collect_ref "JOB_SERVICE_REF" "livemask-job-service" "dev")"
+ADMIN_REF_VALUE="$(collect_ref "ADMIN_REF" "livemask-admin" "dev")"
+WEBSITE_REF_VALUE="$(collect_ref "WEBSITE_REF" "livemask-website" "dev")"
+APP_REF_VALUE="$(collect_ref "APP_REF" "livemask-app" "dev")"
+NODEAGENT_REF_VALUE="$(collect_ref "NODEAGENT_REF" "livemask-nodeagent" "dev")"
+
+bool_json() {
+  case "$1" in
+    true|TRUE|True|1|yes|YES) echo "true" ;;
+    *) echo "false" ;;
+  esac
+}
 
 # ============================================================
 # 3. Health endpoints
@@ -144,7 +154,6 @@ HEALTH_DETAILS=""
 
 if [[ "${COLLECT_ONLY}" == "false" ]] && docker info &>/dev/null; then
   # Backend health
-  BACKEND_PORT="${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
   BE_HEALTH_URL="http://127.0.0.1:${BACKEND_PORT}/api/v1/health"
   BE_HEALTH_RESPONSE=""
   BE_HEALTH_OK=false
@@ -191,7 +200,6 @@ print(json.dumps(h))
 " 2>/dev/null || echo "$HEALTH_RESULTS")
 
   # Job-service health (if running)
-  JOB_PORT="${LIVEMASK_JOB_SERVICE_PORT:-19191}"
   JS_HEALTH_URL="http://127.0.0.1:${JOB_PORT}/health"
   JS_HEALTH_RESPONSE=$(curl -sS --max-time 3 "${JS_HEALTH_URL}" 2>/dev/null || true)
   JS_HEALTH_OK=false
@@ -234,6 +242,10 @@ fi
 # ============================================================
 # 5. Assemble JSON
 # ============================================================
+COMPOSE_UP_DETECTED_JSON="$(bool_json "${COMPOSE_UP_DETECTED}")"
+ALL_CONTAINERS_UP_JSON="$(bool_json "${ALL_CONTAINERS_UP}")"
+HEALTH_ALL_PASS_JSON="$(bool_json "${HEALTH_ALL_PASS}")"
+
 STATUS_JSON=$(python3 -c "
 import json
 
@@ -249,21 +261,31 @@ result = {
     'environment': '${ENV_TYPE}',
     'compose_file': '${COMPOSE_BASENAME}',
     'compose_project': 'livemask-${ENV_TYPE}',
-    'compose_up_detected': json.loads('${COMPOSE_UP_DETECTED,,}'),
-    'all_containers_up': json.loads('${ALL_CONTAINERS_UP,,}'),
+    'host_port_map': {
+        'backend': '${BACKEND_PORT}->8080',
+        'job-service': '${JOB_PORT}->19191',
+        'postgres': '${POSTGRES_HOST_PORT}->5432',
+        'redis': '${REDIS_HOST_PORT}->6379'
+    },
+    'host_health_urls': {
+        'backend': 'http://127.0.0.1:${BACKEND_PORT}/api/v1/health',
+        'job-service': 'http://127.0.0.1:${JOB_PORT}/health'
+    },
+    'compose_up_detected': json.loads('${COMPOSE_UP_DETECTED_JSON}'),
+    'all_containers_up': json.loads('${ALL_CONTAINERS_UP_JSON}'),
     'container_summary': '${CONTAINER_SUMMARY}',
     'containers': ${CONTAINER_JSON},
     'failed_containers': '${FAILED_CONTAINERS}',
     'refs': {
-        'BACKEND_REF': '${REF_MAP[BACKEND_REF]}',
-        'JOB_SERVICE_REF': '${REF_MAP[JOB_SERVICE_REF]}',
-        'ADMIN_REF': '${REF_MAP[ADMIN_REF]}',
-        'WEBSITE_REF': '${REF_MAP[WEBSITE_REF]}',
-        'APP_REF': '${REF_MAP[APP_REF]}',
-        'NODEAGENT_REF': '${REF_MAP[NODEAGENT_REF]}'
+        'BACKEND_REF': '${BACKEND_REF_VALUE}',
+        'JOB_SERVICE_REF': '${JOB_SERVICE_REF_VALUE}',
+        'ADMIN_REF': '${ADMIN_REF_VALUE}',
+        'WEBSITE_REF': '${WEBSITE_REF_VALUE}',
+        'APP_REF': '${APP_REF_VALUE}',
+        'NODEAGENT_REF': '${NODEAGENT_REF_VALUE}'
     },
     'compose_up_result': '${COMPOSE_UP_DETECTED}',
-    'health_all_pass': json.loads('${HEALTH_ALL_PASS,,}'),
+    'health_all_pass': json.loads('${HEALTH_ALL_PASS_JSON}'),
     'health_details': health_details if health_details else '',
     'error_excerpts': error_excerpts if error_excerpts else ''
 }

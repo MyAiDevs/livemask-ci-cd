@@ -133,11 +133,29 @@ uptime = rt.get("uptime", "")
 
 # Collect container names
 container_names = []
+container_lines = []
 for c in rt.get("containers", []):
     if isinstance(c, dict):
         name = c.get("Name", c.get("name", ""))
+        service = c.get("Service", c.get("service", ""))
+        state = c.get("State", c.get("state", ""))
+        status = c.get("Status", c.get("status", ""))
+        publishers = c.get("Publishers", c.get("publishers", []))
+        port_texts = []
+        if isinstance(publishers, list):
+            for p in publishers:
+                if not isinstance(p, dict):
+                    continue
+                published = p.get("PublishedPort", p.get("published_port", ""))
+                target = p.get("TargetPort", p.get("target_port", ""))
+                protocol = p.get("Protocol", p.get("protocol", "tcp"))
+                if published and target:
+                    port_texts.append(f"{published}->{target}/{protocol}")
+        ports = ", ".join(port_texts) if port_texts else "-"
         if name:
             container_names.append(name)
+            label = service or name
+            container_lines.append(f"• {label}: {state or 'unknown'} ({status or 'no status'}), ports {ports}")
 
 # Collect refs
 refs = rt.get("refs", {})
@@ -146,6 +164,7 @@ error_snippets = []
 
 # Build runtime detail lines
 container_list_str = ", ".join(container_names[:10]) if container_names else "none"
+container_detail_str = "\n".join(container_lines[:12]) if container_lines else "no containers reported"
 refs_lines = []
 for key in ["BACKEND_REF", "JOB_SERVICE_REF", "ADMIN_REF", "WEBSITE_REF", "APP_REF", "NODEAGENT_REF"]:
     val = refs.get(key, "")
@@ -242,6 +261,31 @@ runtime_status = (
 elements.append({
     "tag": "div",
     "text": {"tag": "lark_md", "content": runtime_status}
+})
+
+host_port_map = rt.get("host_port_map", {})
+host_health_urls = rt.get("host_health_urls", {})
+port_lines = []
+if isinstance(host_port_map, dict):
+    for service in ["backend", "job-service", "postgres", "redis"]:
+        mapping = host_port_map.get(service)
+        if mapping:
+            port_lines.append(f"• {service}: host {mapping}")
+if port_lines:
+    elements.append({
+        "tag": "div",
+        "text": {"tag": "lark_md", "content": "**Port Mapping**\n" + "\n".join(port_lines)}
+    })
+backend_health_url = host_health_urls.get("backend") if isinstance(host_health_urls, dict) else ""
+if backend_health_url:
+    elements.append({
+        "tag": "div",
+        "text": {"tag": "lark_md", "content": f"**Health URL**\nHost runner checks `{backend_health_url}`; inside Docker, backend listens on container port `8080`."}
+    })
+
+elements.append({
+    "tag": "div",
+    "text": {"tag": "lark_md", "content": "**Container Details**\n" + container_detail_str[:1200]}
 })
 
 # Section: Health details

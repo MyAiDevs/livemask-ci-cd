@@ -1,4 +1,4 @@
-name: livemask-staging
+name: ${LIVEMASK_STACK_NAME:-livemask-staging}
 
 services:
   postgres:
