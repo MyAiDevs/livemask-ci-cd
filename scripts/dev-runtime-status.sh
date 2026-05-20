@@ -249,8 +249,8 @@ result = {
     'environment': '${ENV_TYPE}',
     'compose_file': '${COMPOSE_BASENAME}',
     'compose_project': 'livemask-${ENV_TYPE}',
-    'compose_up_detected': ${COMPOSE_UP_DETECTED},
-    'all_containers_up': ${ALL_CONTAINERS_UP},
+    'compose_up_detected': json.loads('${COMPOSE_UP_DETECTED,,}'),
+    'all_containers_up': json.loads('${ALL_CONTAINERS_UP,,}'),
     'container_summary': '${CONTAINER_SUMMARY}',
     'containers': ${CONTAINER_JSON},
     'failed_containers': '${FAILED_CONTAINERS}',
@@ -263,7 +263,7 @@ result = {
         'NODEAGENT_REF': '${REF_MAP[NODEAGENT_REF]}'
     },
     'compose_up_result': '${COMPOSE_UP_DETECTED}',
-    'health_all_pass': ${HEALTH_ALL_PASS},
+    'health_all_pass': json.loads('${HEALTH_ALL_PASS,,}'),
     'health_details': health_details if health_details else '',
     'error_excerpts': error_excerpts if error_excerpts else ''
 }
