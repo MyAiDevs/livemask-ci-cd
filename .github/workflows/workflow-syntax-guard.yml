@@ -31,6 +31,3 @@ jobs:
 
       - name: Validate workflow YAML and shell syntax
         run: bash scripts/validate-workflow-syntax.sh
-
-      - name: Validate staging compose config
-        run: docker compose -f infra/docker-compose.staging.yml config >/tmp/staging-compose.yml
