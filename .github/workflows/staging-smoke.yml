@@ -166,11 +166,7 @@ jobs:
           # Check keep_alive from event payload (only set on workflow_dispatch)
           ka="false"
           if [[ -f "$GITHUB_EVENT_PATH" ]]; then
-            raw=$(python3 -c "
-import json
-with open('$GITHUB_EVENT_PATH') as f:
-    print(json.load(f).get('inputs', {}).get('keep_alive', 'false').strip())
-" 2>/dev/null) || ka="false"
+            raw=$(python3 -c "import json, os; p=os.environ.get('GITHUB_EVENT_PATH'); data=json.load(open(p)); print(str(data.get('inputs', {}).get('keep_alive', 'false')).strip())" 2>/dev/null) || raw="false"
             ka=$(echo "${raw}" | tr -d '[:space:]')
           fi
           echo "keep_alive='${ka}'"
