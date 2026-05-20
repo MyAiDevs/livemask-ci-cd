@@ -159,6 +159,7 @@ for c in rt.get("containers", []):
 
 # Collect refs
 refs = rt.get("refs", {})
+local_only_refs = rt.get("local_only_refs", {})
 failed_steps = []
 error_snippets = []
 
@@ -166,10 +167,16 @@ error_snippets = []
 container_list_str = ", ".join(container_names[:10]) if container_names else "none"
 container_detail_str = "\n".join(container_lines[:12]) if container_lines else "no containers reported"
 refs_lines = []
-for key in ["BACKEND_REF", "JOB_SERVICE_REF", "ADMIN_REF", "WEBSITE_REF", "APP_REF", "NODEAGENT_REF"]:
+for key in ["BACKEND_REF", "JOB_SERVICE_REF", "ADMIN_REF", "WEBSITE_REF", "NODEAGENT_REF"]:
     val = refs.get(key, "")
     if val:
         refs_lines.append(f"• {key}={val}")
+local_only_lines = []
+if isinstance(local_only_refs, dict):
+    for key in ["APP_REF"]:
+        val = local_only_refs.get(key, "")
+        if val:
+            local_only_lines.append(f"• {key}={val} (local verification only, not deployed to dev runtime)")
 
 # -----------------------------------------------------------
 # Failure analysis
@@ -248,6 +255,13 @@ if refs_lines:
     elements.append({
         "tag": "div",
         "text": {"tag": "lark_md", "content": "**Git Refs**\n" + "\n".join(refs_lines)}
+    })
+
+if local_only_lines:
+    elements.append({"tag": "hr"})
+    elements.append({
+        "tag": "div",
+        "text": {"tag": "lark_md", "content": "**Local-only Clients**\n" + "\n".join(local_only_lines)}
     })
 
 # Section: Runtime status

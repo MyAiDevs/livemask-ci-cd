@@ -281,8 +281,10 @@ result = {
         'JOB_SERVICE_REF': '${JOB_SERVICE_REF_VALUE}',
         'ADMIN_REF': '${ADMIN_REF_VALUE}',
         'WEBSITE_REF': '${WEBSITE_REF_VALUE}',
-        'APP_REF': '${APP_REF_VALUE}',
         'NODEAGENT_REF': '${NODEAGENT_REF_VALUE}'
+    },
+    'local_only_refs': {
+        'APP_REF': '${APP_REF_VALUE}'
     },
     'compose_up_result': '${COMPOSE_UP_DETECTED}',
     'health_all_pass': json.loads('${HEALTH_ALL_PASS_JSON}'),
