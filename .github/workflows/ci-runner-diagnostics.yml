@@ -4,14 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'Action to perform: diagnose, restart, or both'
+        description: 'Action: diagnose, restart, or both'
         required: true
         default: 'both'
-        type: choice
-        options:
-          - diagnose
-          - restart
-          - both
 
 permissions:
   actions: read
@@ -46,8 +41,8 @@ import sys, json
 data = json.load(sys.stdin)
 for r in data.get('runners', []):
     if r['name'] == 'livemask-ci-runner-01':
-        print(f\"  Runner: {r['name']}\")
-        print(f\"  Status: {r['status']}\")
-        print(f\"  Busy:   {r['busy']}\")
+        print(f'  Runner: {r[\"name\"]}')
+        print(f'  Status: {r[\"status\"]}')
+        print(f'  Busy:   {r[\"busy\"]}')
         break
 "
