@@ -322,9 +322,9 @@ website_url = host_health_urls.get("website") if isinstance(host_health_urls, di
 if admin_url or website_url:
     local_urls = []
     if admin_url:
-        local_urls.append(f"• admin: `{admin_url}` (reserved unless admin container is part of this compose)")
+        local_urls.append(f"• admin: `{admin_url}`")
     if website_url:
-        local_urls.append(f"• website: `{website_url}` (reserved unless website container is part of this compose)")
+        local_urls.append(f"• website: `{website_url}`")
     elements.append({
         "tag": "div",
         "text": {"tag": "lark_md", "content": "**Frontend Runtime URLs**\n" + "\n".join(local_urls)}

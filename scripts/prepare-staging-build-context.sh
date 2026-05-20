@@ -32,11 +32,13 @@ WORKSPACE_ROOT="${LIVEMASK_WORKSPACE_ROOT:-$HOME/Developer/LiveMask}"
 BUILD_DEPS="${REPO_ROOT}/infra/_build_deps"
 CI_MODE=false
 
-# Map: build-dest dir  ->  workspace repo name
-declare -A REPO_MAP=(
-  ["backend"]="livemask-backend"
-  ["job-service"]="livemask-job-service"
-)
+# Map rows: build-dest dir | workspace repo name
+REPO_ROWS="
+backend|livemask-backend
+admin|livemask-admin
+website|livemask-website
+job-service|livemask-job-service
+"
 
 # ============================================================
 # Parse args
@@ -69,8 +71,8 @@ done
 echo "[prepare] Preparing staging build context at: ${BUILD_DEPS}"
 mkdir -p "${BUILD_DEPS}"
 
-for dir_name in "${!REPO_MAP[@]}"; do
-  repo_name="${REPO_MAP[${dir_name}]}"
+printf "%s" "${REPO_ROWS}" | while IFS='|' read -r dir_name repo_name; do
+  [[ -z "${dir_name}" ]] && continue
   target="${BUILD_DEPS}/${dir_name}"
 
   if [[ "${CI_MODE}" == "true" ]]; then
@@ -78,10 +80,10 @@ for dir_name in "${!REPO_MAP[@]}"; do
     # If go.mod exists, the checkout succeeded — just ensure .exists.
     # If not, create .exists as a stub (but workflow should have checked out).
     mkdir -p "${target}"
-    if [[ -f "${target}/go.mod" ]]; then
-      echo "[prepare]  [CI] ${target} — source from checkout, go.mod found"
+    if [[ -f "${target}/go.mod" || -f "${target}/package.json" ]]; then
+      echo "[prepare]  [CI] ${target} — source from checkout found"
     else
-      echo "[prepare]  [CI] ${target} — no go.mod (checkout may be missing), creating stub"
+      echo "[prepare]  [CI] ${target} — no go.mod/package.json (checkout may be missing), creating stub"
     fi
     touch "${target}/.exists"
     continue

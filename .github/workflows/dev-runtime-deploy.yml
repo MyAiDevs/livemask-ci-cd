@@ -19,6 +19,8 @@ jobs:
     env:
       BACKEND_REF: dev
       JOB_SERVICE_REF: dev
+      ADMIN_REF: dev
+      WEBSITE_REF: dev
       LIVEMASK_STACK_NAME: livemask-dev
       LIVEMASK_BACKEND_HTTP_PORT: "18080"
       LIVEMASK_ADMIN_PORT: "3001"
@@ -48,6 +50,22 @@ jobs:
           path: infra/_build_deps/job-service
           token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
 
+      - name: Checkout admin source into build context
+        uses: actions/checkout@v4
+        with:
+          repository: MyAiDevs/livemask-admin
+          ref: ${{ env.ADMIN_REF }}
+          path: infra/_build_deps/admin
+          token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
+
+      - name: Checkout website source into build context
+        uses: actions/checkout@v4
+        with:
+          repository: MyAiDevs/livemask-website
+          ref: ${{ env.WEBSITE_REF }}
+          path: infra/_build_deps/website
+          token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
+
       - name: Prepare dev runtime build context
         run: bash scripts/prepare-staging-build-context.sh --ci
 
@@ -55,8 +73,8 @@ jobs:
         run: |
           echo "Host port mapping used by persistent dev runtime:"
           echo "  host 18080 -> backend container 8080"
-          echo "  host 3001 -> admin container 3000 (reserved; admin service is not in staging compose yet)"
-          echo "  host 3002 -> website container 3000/5173 (reserved; website service is not in staging compose yet)"
+          echo "  host 3001 -> admin container 3000"
+          echo "  host 3002 -> website container 3000"
           echo "  host 19191 -> job-service container 19191"
           echo "  host 15432 -> postgres container 5432"
           echo "  host 16379 -> redis container 6379"
@@ -79,6 +97,30 @@ jobs:
           echo "Checking host URL http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT}/api/v1/health"
           echo "This maps to backend container port 8080."
           curl -fsS "http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT}/api/v1/health"
+
+      - name: Verify dev frontend routes
+        run: |
+          check_url() {
+            local name="$1"
+            local url="$2"
+            local code=""
+            for attempt in $(seq 1 30); do
+              code=$(curl -sS --max-time 3 -o /dev/null -w "%{http_code}" "${url}" 2>/dev/null || echo "000")
+              case "${code}" in
+                200|301|302|307|308)
+                  echo "${name} reachable: HTTP ${code} (${url})"
+                  return 0
+                  ;;
+              esac
+              echo "Waiting for ${name}... attempt ${attempt}/30, HTTP ${code}"
+              sleep 2
+            done
+            echo "${name} unavailable after waiting: HTTP ${code} (${url})" >&2
+            return 1
+          }
+
+          check_url "admin" "http://127.0.0.1:${LIVEMASK_ADMIN_PORT}/login"
+          check_url "website" "http://127.0.0.1:${LIVEMASK_WEBSITE_PORT}/"
 
       - name: Upload runtime status artifact
         if: always()

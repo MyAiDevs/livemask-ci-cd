@@ -221,6 +221,25 @@ results.append({
 })
 print(json.dumps(results))
 " 2>/dev/null || echo "$HEALTH_RESULTS")
+
+  # Admin and website HTTP reachability
+  ADMIN_URL="http://127.0.0.1:${ADMIN_PORT}/login"
+  ADMIN_CODE=$(curl -sS --max-time 3 -o /dev/null -w "%{http_code}" "${ADMIN_URL}" 2>/dev/null || echo "000")
+  if [[ "${ADMIN_CODE}" =~ ^(200|301|302|307|308)$ ]]; then
+    HEALTH_DETAILS+="admin page: HTTP ${ADMIN_CODE}\n"
+  else
+    HEALTH_ALL_PASS=false
+    HEALTH_DETAILS+="admin page: HTTP ${ADMIN_CODE} (${ADMIN_URL})\n"
+  fi
+
+  WEBSITE_URL="http://127.0.0.1:${WEBSITE_PORT}/"
+  WEBSITE_CODE=$(curl -sS --max-time 3 -o /dev/null -w "%{http_code}" "${WEBSITE_URL}" 2>/dev/null || echo "000")
+  if [[ "${WEBSITE_CODE}" =~ ^(200|301|302|307|308)$ ]]; then
+    HEALTH_DETAILS+="website page: HTTP ${WEBSITE_CODE}\n"
+  else
+    HEALTH_ALL_PASS=false
+    HEALTH_DETAILS+="website page: HTTP ${WEBSITE_CODE} (${WEBSITE_URL})\n"
+  fi
 fi
 
 # ============================================================
