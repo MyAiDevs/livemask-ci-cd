@@ -156,13 +156,10 @@ jobs:
             --format text || true
       - name: Stop staging
         if: always()
+        env:
+          KEEP_ALIVE: ${{ inputs.keep_alive || 'false' }}
         run: |
-          # Check keep_alive from event payload (only set on workflow_dispatch)
-          keep_alive="false"
-          if [[ -f "$GITHUB_EVENT_PATH" ]]; then
-            keep_alive=$(python3 -c "import json; print(json.load(open('$GITHUB_EVENT_PATH')).get('inputs', {}).get('keep_alive', 'false'))" 2>/dev/null || echo "false")
-          fi
-          if [[ "${{ job.status }}" != "success" && "${keep_alive}" == "true" ]]; then
+          if [[ "${{ job.status }}" != "success" && "${KEEP_ALIVE}" == "true" && "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "=== KEEP_ALIVE enabled — containers left running for SSH debugging ==="
             echo ""
             echo "SSH to monitoring-stack and inspect:"
