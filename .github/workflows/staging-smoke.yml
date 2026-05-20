@@ -40,6 +40,12 @@ jobs:
           --repo livemask-ci-cd
           --docs-required false
           --missing-runtime warn
+      - name: Diagnose CI runner (TASK-CICD-RUNNER-BACKLOG-001)
+        run: bash scripts/diagnose-ci-runner.sh
+        continue-on-error: true
+      - name: Restart CI runner if stuck (TASK-CICD-RUNNER-BACKLOG-001)
+        run: bash scripts/restart-ci-runner.sh
+        continue-on-error: true
       - name: Show runner
         run: |
           hostname
