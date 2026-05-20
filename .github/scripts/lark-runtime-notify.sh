@@ -72,6 +72,26 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from datetime import datetime, timedelta, timezone
+
+def truncate_text(text, limit=1200):
+    text = str(text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 32)].rstrip() + "\n... truncated"
+
+def bullet_lines(text, limit=1200):
+    lines = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if line:
+            lines.append(f"• {line}")
+    if not lines:
+        lines = ["• no details"]
+    return truncate_text("\n".join(lines), limit)
+
+def plain_lines(text, limit=1200):
+    return truncate_text(str(text or "").strip() or "No details", limit)
 
 result = sys.argv[1]
 runtime_json_raw = sys.argv[2]
@@ -321,7 +341,7 @@ if health_details:
     elements.append({"tag": "hr"})
     elements.append({
         "tag": "div",
-        "text": {"tag": "lark_md", "content": f"**Health Details**\n```text\n{health_details[:600]}\n```"}
+        "text": {"tag": "lark_md", "content": "**Health Details**\n" + bullet_lines(health_details, 800)}
     })
 
 # Section: Error info (failure only)
@@ -340,7 +360,7 @@ if result != "success":
             snippet_text = snippet_text[:1150] + "\n... (truncated)"
         elements.append({
             "tag": "div",
-            "text": {"tag": "lark_md", "content": f"**Error Snippet**\n```text\n{snippet_text}\n```"}
+            "text": {"tag": "lark_md", "content": "**Error Snippet**\n" + plain_lines(snippet_text, 1200)}
         })
 
     # Try to fetch GitHub error logs (reuse logic from lark-notify.sh)
@@ -395,7 +415,7 @@ if result != "success":
     if error_excerpt:
         elements.append({
             "tag": "div",
-            "text": {"tag": "lark_md", "content": f"**Log Error Excerpt**\n```text\n{error_excerpt}\n```"}
+            "text": {"tag": "lark_md", "content": "**Log Error Excerpt**\n" + plain_lines(error_excerpt, 1200)}
         })
     elif not error_snippets:
         elements.append({
@@ -404,10 +424,12 @@ if result != "success":
         })
 
 # Footer
+cst_now = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S CST")
+utc_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 elements.append({
     "tag": "note",
     "elements": [
-        {"tag": "plain_text", "content": f"Runtime: {env_label} | Host: {hostname} | {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}"}
+        {"tag": "plain_text", "content": f"Runtime: {env_label} | Host: {hostname} | {cst_now} / {utc_now}"}
     ]
 })
 
