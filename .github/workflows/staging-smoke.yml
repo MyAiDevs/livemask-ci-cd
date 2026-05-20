@@ -154,12 +154,27 @@ jobs:
             --repo livemask-ci-cd \
             --dry-run \
             --format text || true
+      - name: Mark failure for keep_alive
+        if: failure()
+        run: |
+          mkdir -p /tmp/livemask-runtime
+          echo "true" > /tmp/livemask-runtime/keep_alive_marker
+
       - name: Stop staging
         if: always()
-        env:
-          KEEP_ALIVE: ${{ inputs.keep_alive || 'false' }}
         run: |
-          if [[ "${{ job.status }}" != "success" && "${KEEP_ALIVE}" == "true" && "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          # Check keep_alive from event payload (only set on workflow_dispatch)
+          ka="false"
+          if [[ -f "$GITHUB_EVENT_PATH" ]]; then
+            raw=$(python3 -c "
+import json
+with open('$GITHUB_EVENT_PATH') as f:
+    print(json.load(f).get('inputs', {}).get('keep_alive', 'false').strip())
+" 2>/dev/null) || ka="false"
+            ka=$(echo "${raw}" | tr -d '[:space:]')
+          fi
+          echo "keep_alive='${ka}'"
+          if [[ "${ka}" == "true" && -f /tmp/livemask-runtime/keep_alive_marker ]]; then
             echo "=== KEEP_ALIVE enabled — containers left running for SSH debugging ==="
             echo ""
             echo "SSH to monitoring-stack and inspect:"
