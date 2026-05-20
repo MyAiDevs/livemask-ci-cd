@@ -71,6 +71,7 @@ jobs:
       - name: Start staging
         run: docker compose -f infra/docker-compose.staging.yml up -d --build
       - name: Collect runtime status
+        continue-on-error: true
         run: |
           mkdir -p /tmp/livemask-runtime
           bash scripts/dev-runtime-status.sh \
