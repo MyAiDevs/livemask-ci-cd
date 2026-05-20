@@ -30,6 +30,8 @@ jobs:
       JOB_SERVICE_REF: dev
       LIVEMASK_STACK_NAME: livemask-smoke
       LIVEMASK_BACKEND_HTTP_PORT: "28080"
+      LIVEMASK_ADMIN_PORT: "23001"
+      LIVEMASK_WEBSITE_PORT: "23002"
       LIVEMASK_JOB_SERVICE_PORT: "29191"
       POSTGRES_PORT: "25432"
       REDIS_PORT: "26379"
@@ -63,6 +65,8 @@ jobs:
           docker compose version
           echo "Ephemeral smoke port mapping:"
           echo "  host 28080 -> backend container 8080"
+          echo "  host 23001 -> admin container 3000 (reserved; admin service is not in staging compose yet)"
+          echo "  host 23002 -> website container 3000/5173 (reserved; website service is not in staging compose yet)"
           echo "  host 29191 -> job-service container 19191"
           echo "  host 25432 -> postgres container 5432"
           echo "  host 26379 -> redis container 6379"

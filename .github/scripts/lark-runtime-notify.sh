@@ -281,7 +281,7 @@ host_port_map = rt.get("host_port_map", {})
 host_health_urls = rt.get("host_health_urls", {})
 port_lines = []
 if isinstance(host_port_map, dict):
-    for service in ["backend", "job-service", "postgres", "redis"]:
+    for service in ["backend", "admin", "website", "job-service", "postgres", "redis"]:
         mapping = host_port_map.get(service)
         if mapping:
             port_lines.append(f"• {service}: host {mapping}")
@@ -295,6 +295,19 @@ if backend_health_url:
     elements.append({
         "tag": "div",
         "text": {"tag": "lark_md", "content": f"**Health URL**\nHost runner checks `{backend_health_url}`; inside Docker, backend listens on container port `8080`."}
+    })
+
+admin_url = host_health_urls.get("admin") if isinstance(host_health_urls, dict) else ""
+website_url = host_health_urls.get("website") if isinstance(host_health_urls, dict) else ""
+if admin_url or website_url:
+    local_urls = []
+    if admin_url:
+        local_urls.append(f"• admin: `{admin_url}` (reserved unless admin container is part of this compose)")
+    if website_url:
+        local_urls.append(f"• website: `{website_url}` (reserved unless website container is part of this compose)")
+    elements.append({
+        "tag": "div",
+        "text": {"tag": "lark_md", "content": "**Frontend Runtime URLs**\n" + "\n".join(local_urls)}
     })
 
 elements.append({

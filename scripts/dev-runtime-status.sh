@@ -59,6 +59,8 @@ COMPOSE_BASENAME="$(basename "${COMPOSE_FILE}")"
 HOSTNAME="$(hostname 2>/dev/null || echo 'unknown')"
 UPTIME="$(uptime 2>/dev/null | sed 's/,.*//' || echo 'unknown')"
 BACKEND_PORT="${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
+ADMIN_PORT="${LIVEMASK_ADMIN_PORT:-3001}"
+WEBSITE_PORT="${LIVEMASK_WEBSITE_PORT:-3002}"
 JOB_PORT="${LIVEMASK_JOB_SERVICE_PORT:-19191}"
 POSTGRES_HOST_PORT="${POSTGRES_PORT:-15432}"
 REDIS_HOST_PORT="${REDIS_PORT:-16379}"
@@ -263,12 +265,16 @@ result = {
     'compose_project': 'livemask-${ENV_TYPE}',
     'host_port_map': {
         'backend': '${BACKEND_PORT}->8080',
+        'admin': '${ADMIN_PORT}->3000',
+        'website': '${WEBSITE_PORT}->3000/5173',
         'job-service': '${JOB_PORT}->19191',
         'postgres': '${POSTGRES_HOST_PORT}->5432',
         'redis': '${REDIS_HOST_PORT}->6379'
     },
     'host_health_urls': {
         'backend': 'http://127.0.0.1:${BACKEND_PORT}/api/v1/health',
+        'admin': 'http://127.0.0.1:${ADMIN_PORT}/login',
+        'website': 'http://127.0.0.1:${WEBSITE_PORT}/',
         'job-service': 'http://127.0.0.1:${JOB_PORT}/health'
     },
     'compose_up_detected': json.loads('${COMPOSE_UP_DETECTED_JSON}'),
