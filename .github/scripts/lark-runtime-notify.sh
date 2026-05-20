@@ -321,17 +321,15 @@ if result != "success":
                     excerpt_text = excerpt_text[:1150] + "\n... (truncated)"
                 error_excerpt = excerpt_text
 
-    # Show GitHub log excerpts (or runtime error excerpts) — skip if already shown from runtime
-    error_display = error_excerpt if error_excerpt else ""
-    if error_display and not error_snippets:
+    if error_excerpt:
         elements.append({
             "tag": "div",
-            "text": {"tag": "lark_md", "content": f"**Error Snippet**\n```text\n{error_display}\n```"}
+            "text": {"tag": "lark_md", "content": f"**Log Error Excerpt**\n```text\n{error_excerpt}\n```"}
         })
     elif not error_snippets:
         elements.append({
             "tag": "div",
-            "text": {"tag": "lark_md", "content": "**Error Snippet**\nWorkflow failure detected. Check run logs for details.\n"}  # noqa
+            "text": {"tag": "lark_md", "content": "**Error Snippet**\nWorkflow failure -- check GitHub Actions run logs\n"}
         })
 
 # Footer
