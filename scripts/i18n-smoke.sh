@@ -274,7 +274,7 @@ if zh_chars > 5:
 else:
     print('MINIMAL: ' + str(zh_chars) + ' Chinese chars')
 " 2>/dev/null || echo "PARSE_ERROR")
-      if echo "${ZH_READY}" | grep -q "OK"; then
+      if echo "${HAS_ZH}" | grep -q "OK"; then
         pass "Admin zh-CN translations: valid Chinese content"
       else
         pass "Admin zh-CN translations: accessible (${HAS_ZH})"
