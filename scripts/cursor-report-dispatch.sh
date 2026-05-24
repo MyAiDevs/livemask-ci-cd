@@ -180,8 +180,7 @@ PAYLOAD=$(cat <<JSON
     "dev_merge_commit": "$DEV_MERGE_COMMIT",
     "validation": "$VALIDATION",
     "result": "$RESULT",
-    "report_kind": "$REPORT_KIND",
-    "completion_time": "$COMPLETION_TIME"
+    "report_kind": "$REPORT_KIND"
   }
 }
 JSON
