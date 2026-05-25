@@ -775,6 +775,107 @@ else
 fi
 
 echo ""
+# ── NodeAgent Credential Rotation Smoke (TASK-CICD-NODEAGENT-CREDENTIAL-ROTATION-SMOKE-001) ──
+echo ""
+echo "=== Smoke: NodeAgent Credential Rotation (TASK-CICD-NODEAGENT-CREDENTIAL-ROTATION-SMOKE-001) ==="
+if bash "${SCRIPT_DIR}/nodeagent-credential-rotation-smoke.sh" 2>&1; then
+  echo "NodeAgent credential rotation smoke PASSED."
+else
+  cred_rc=$?
+  echo ""
+  echo "=== NodeAgent Credential Rotation Smoke FAILED ==="
+  echo "--- docker compose ps ---"
+  docker compose -f "${COMPOSE_FILE}" ps 2>/dev/null || true
+  echo "--- docker compose logs backend (last 100, redacted) ---"
+  docker compose -f "${COMPOSE_FILE}" logs backend --tail=100 2>/dev/null | \
+    python3 -c '
+import sys, re
+
+SECRET_FIELDS = frozenset([
+    "node_secret", "secret_hash", "access_token", "bearer_token",
+    "refresh_token", "api_key", "private_key", "dsn", "secret",
+    "hmac_key", "signing_key", "session_token",
+])
+
+text = sys.stdin.read()
+
+# JSON-aware redaction
+import json
+try:
+    data = json.loads(text)
+    def walk(obj):
+        if isinstance(obj, dict):
+            return {k: ("<REDACTED>" if k in SECRET_FIELDS else walk(v)) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [walk(v) for v in obj]
+        return obj
+    sys.stdout.write(json.dumps(walk(data), ensure_ascii=False))
+    sys.exit(0)
+except Exception:
+    pass
+
+# Authorization: Bearer <jwt>
+text = re.sub(
+    r"(Authorization:\s*Bearer\s+)[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+",
+    r"\1<REDACTED-JWT>", text, flags=re.IGNORECASE
+)
+# X-Signature: <long-hex>
+text = re.sub(r"(X-Signature:\s*)[a-fA-F0-9]{64,}", r"\1<REDACTED-SIG>", text)
+# key=value or key:value for known fields
+text = re.sub(
+    r"(node_secret|access_token|bearer_token|secret_hash|private_key)\s*[=:]\s*[A-Za-z0-9_\-{}]{8,}",
+    r"\1=<REDACTED>", text, flags=re.IGNORECASE
+)
+# Long hex / base64
+text = re.sub(r"[a-fA-F0-9]{64,}", "<REDACTED-HEX>", text)
+text = re.sub(r"[A-Za-z0-9+/=]{80,}", "<REDACTED-BASE64>", text)
+text = re.sub(r"(postgres|redis|mysql|mongodb)://[^@\s]+@", r"\1://<REDACTED-CREDS>@", text, flags=re.IGNORECASE)
+sys.stdout.write(text)
+' 2>/dev/null || echo "  (log redaction unavailable)"
+  echo "--- docker compose logs nodeagent (last 50, redacted) ---"
+  docker compose -f "${COMPOSE_FILE}" logs nodeagent --tail=50 2>/dev/null | \
+    python3 -c '
+import sys, re
+
+SECRET_FIELDS = frozenset([
+    "node_secret", "secret_hash", "access_token", "bearer_token",
+    "refresh_token", "api_key", "private_key", "dsn", "secret",
+    "hmac_key", "signing_key", "session_token",
+])
+
+text = sys.stdin.read()
+import json
+try:
+    data = json.loads(text)
+    def walk(obj):
+        if isinstance(obj, dict):
+            return {k: ("<REDACTED>" if k in SECRET_FIELDS else walk(v)) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [walk(v) for v in obj]
+        return obj
+    sys.stdout.write(json.dumps(walk(data), ensure_ascii=False))
+    sys.exit(0)
+except Exception:
+    pass
+
+text = re.sub(
+    r"(Authorization:\s*Bearer\s+)[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+",
+    r"\1<REDACTED-JWT>", text, flags=re.IGNORECASE
+)
+text = re.sub(r"(X-Signature:\s*)[a-fA-F0-9]{64,}", r"\1<REDACTED-SIG>", text)
+text = re.sub(
+    r"(node_secret|access_token|bearer_token|secret_hash|private_key)\s*[=:]\s*[A-Za-z0-9_\-{}]{8,}",
+    r"\1=<REDACTED>", text, flags=re.IGNORECASE
+)
+text = re.sub(r"[a-fA-F0-9]{64,}", "<REDACTED-HEX>", text)
+text = re.sub(r"[A-Za-z0-9+/=]{80,}", "<REDACTED-BASE64>", text)
+text = re.sub(r"(postgres|redis|mysql|mongodb)://[^@\s]+@", r"\1://<REDACTED-CREDS>@", text, flags=re.IGNORECASE)
+sys.stdout.write(text)
+' 2>/dev/null || echo "  (log redaction unavailable)"
+  exit ${cred_rc}
+fi
+
+echo ""
 # ── Real Data Closed Loop Smoke (TASK-CICD-REAL-DATA-CLOSED-LOOP-SMOKE-001) ──
 echo ""
 echo "=== Smoke: Real Data Closed Loop (TASK-CICD-REAL-DATA-CLOSED-LOOP-SMOKE-001) ==="
@@ -920,4 +1021,4 @@ else
 fi
 
 echo ""
-echo "Smoke PASS: full stack (health + config center + auth/rbac + node agent + billing/devices + connect session + content system + geoip + job-service + dashboard + protocol-endpoint-rollout + protocol-capability + geoip-credentials + nodeagent-release + website-blog + system-settings + scheduler + app-release + sentry-config + observability + i18n-language + bandwidth-auto-reconnect + traffic-analytics-v2 + admin-nav-ia + jobs-hardening + growth-revenue + reward-notification + release-control + connection-quality + nodeagent-config-sync + nat-sharing-guard + nodeagent-speedtest-bandwidth + real-data-closed-loop + jobs-real-data + node-status-freshness + app-runtime-governance + protocol-parity + log-retention + admin-nodes-ux + website-i18n-announcement + secret-leak-standard + worker-harness)"
+echo "Smoke PASS: full stack (health + config center + auth/rbac + node agent + billing/devices + connect session + content system + geoip + job-service + dashboard + protocol-endpoint-rollout + protocol-capability + geoip-credentials + nodeagent-release + website-blog + system-settings + scheduler + app-release + sentry-config + observability + i18n-language + bandwidth-auto-reconnect + traffic-analytics-v2 + admin-nav-ia + jobs-hardening + growth-revenue + reward-notification + release-control + connection-quality + nodeagent-config-sync + nat-sharing-guard + nodeagent-speedtest-bandwidth + nodeagent-credential-rotation + real-data-closed-loop + jobs-real-data + node-status-freshness + app-runtime-governance + protocol-parity + log-retention + admin-nodes-ux + website-i18n-announcement + secret-leak-standard + worker-harness)"
