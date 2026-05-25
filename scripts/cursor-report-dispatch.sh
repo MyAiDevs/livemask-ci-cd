@@ -103,6 +103,7 @@ BODY=$(CR_DISPATCH_TASK_ID="${TASK_ID}" \
 import json, os, datetime
 
 client_payload = {
+    # Keep ≤ 10 properties (GitHub repository_dispatch API limit).
     "task_id": os.environ.get("CR_DISPATCH_TASK_ID", ""),
     "result": os.environ.get("CR_DISPATCH_RESULT", "completed"),
     "repo": os.environ.get("CR_DISPATCH_REPO", ""),
@@ -113,8 +114,6 @@ client_payload = {
     "dev_merge_commit": os.environ.get("CR_DISPATCH_DEV_MERGE_COMMIT", ""),
     "validation": os.environ.get("CR_DISPATCH_VALIDATION", ""),
     "completion_time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    "source_repo": os.environ.get("CR_DISPATCH_REPO", ""),
-    "payload_version": "1",
 }
 body = {
     "event_type": "cursor-report-received",
