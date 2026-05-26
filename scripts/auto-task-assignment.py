@@ -842,6 +842,7 @@ def dispatch(
                         evidence_data["worker_command"] = worker_cmd
                         if agent_model:
                             env["CURSOR_MODEL"] = agent_model
+                            env["AICHAT_MODEL"] = agent_model
                     elif mode == "implement-for-review":
                         brief_path = sync_worker_brief(worker_repo, task, docs_dir)
                         evidence_data["brief_path"] = str(brief_path)
@@ -1053,7 +1054,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--agent-executor",
-        choices=["cursor", "grok", "codex"],
+        choices=["cursor", "grok", "codex", "aichat"],
         default=DEFAULT_AGENT_EXECUTOR,
         help="Executor passed to agent_executor.sh when --worker-backend agent-executor is used.",
     )
