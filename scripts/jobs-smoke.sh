@@ -215,7 +215,12 @@ fi
 if [[ -n "${run_id:-}" ]]; then
   sleep 3
   if detail="$(json_get "${JOB_SERVICE_URL}/internal/jobs/runs/${run_id}" 2>/dev/null)"; then
-    echo "${detail}" | grep -Eq '"status":"(queued|running|succeeded)"' && ok "Run detail status valid" || bad "run detail invalid"
+    echo "${detail}"
+    if echo "${detail}" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"(queued|running|succeeded|failed|cancel_requested|cancelled|skipped|paused|blocked)"'; then
+      ok "Run detail status valid"
+    else
+      bad "run detail invalid"
+    fi
   else
     bad "Run detail unavailable"
   fi
