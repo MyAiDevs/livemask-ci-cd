@@ -12,6 +12,7 @@
 #   SC-03  expired lease allows task selection
 #   SC-04  non-dry-run accept-only acquires lease in temp lease file
 #   SC-04B accept-only uses wildcard expected_files when ledger scope is missing
+#   SC-04C repeated acquire by same owner refreshes the existing lease
 #   SC-05  worker command mapping resolves expected paths for all 6 runtime repos
 #   SC-06  implement-for-review requires opt-in guard
 #   SC-07  no commits/merges/pushes/dispatches in any mode
@@ -20,6 +21,8 @@
 #   SC-10  active work expected_files overlap blocks selection
 #   SC-11  same repo different expected_files can run in parallel
 #   SC-12  unknown expected_files on same repo blocks conservatively
+#   SC-13  worker invocation receives a supported default Cursor SDK model
+#   SC-14  worker timeout is configurable and long enough for SDK agents
 
 set -euo pipefail
 
@@ -56,7 +59,7 @@ assert_eq() {
 
 assert_contains() {
   local label="$1" haystack="$2" needle="$3"
-  if echo "${haystack}" | grep -qF "${needle}"; then
+  if echo "${haystack}" | grep -qF -- "${needle}"; then
     echo "  PASS: ${label}"
     PASS_COUNT=$((PASS_COUNT + 1))
   else
@@ -70,7 +73,7 @@ assert_contains() {
 
 assert_not_contains() {
   local label="$1" haystack="$2" needle="$3"
-  if ! echo "${haystack}" | grep -qF "${needle}"; then
+  if ! echo "${haystack}" | grep -qF -- "${needle}"; then
     echo "  PASS: ${label}"
     PASS_COUNT=$((PASS_COUNT + 1))
   else
@@ -413,6 +416,57 @@ PY
   teardown_sandbox
 }
 
+test_repeated_accept_refreshes_existing_lease() {
+  echo ""
+  echo "=== SC-04C: repeated accept refreshes existing lease ==="
+  setup_sandbox
+
+  run_assign "--mode accept-only --limit 1 --json" >/dev/null
+  run_assign "--mode accept-only --limit 1 --json" >/dev/null
+
+  local active_count
+  active_count="$(python3 - <<PY
+import json
+from pathlib import Path
+data = json.loads(Path("${SANDBOX}/task-leases.json").read_text())
+print(sum(
+    1
+    for lease in data["leases"]
+    if lease.get("task_id") == "TASK-SMOKE-FAKE-001"
+    and lease.get("lease_owner") == "ci-cd-smoke-test"
+    and lease.get("status") == "active"
+))
+PY
+)"
+  assert_contains "SC-04C: only one active lease remains" "${active_count}" "1"
+
+  verify_real_files_unchanged "SC-04C"
+
+  teardown_sandbox
+}
+
+test_worker_invocation_uses_supported_default_model() {
+  echo ""
+  echo "=== SC-13: worker invocation uses supported default model ==="
+
+  local source
+  source="$(cat "${AUTO_ASSIGN}")"
+  assert_contains "SC-13: default model constant is supported" "${source}" 'DEFAULT_CURSOR_SDK_MODEL = "default"'
+  assert_contains "SC-13: worker env receives default model" "${source}" 'env.setdefault("CURSOR_SDK_MODEL", DEFAULT_CURSOR_SDK_MODEL)'
+
+}
+
+test_worker_timeout_is_configurable() {
+  echo ""
+  echo "=== SC-14: worker timeout is configurable ==="
+
+  local source
+  source="$(cat "${AUTO_ASSIGN}")"
+  assert_contains "SC-14: default timeout supports real SDK agents" "${source}" 'DEFAULT_WORKER_TIMEOUT_SECONDS = 1800'
+  assert_contains "SC-14: CLI exposes worker timeout" "${source}" '--worker-timeout-seconds'
+  assert_contains "SC-14: subprocess uses configured timeout" "${source}" 'timeout=worker_timeout_seconds'
+}
+
 # ============================================================================
 # SC-05: Worker command mapping resolves expected script paths for all 6 runtime repos
 # ============================================================================
@@ -709,6 +763,7 @@ test_active_lease_blocks_selection
 test_expired_lease_allows_selection
 test_accept_acquires_lease
 test_accept_missing_expected_files_uses_wildcard
+test_repeated_accept_refreshes_existing_lease
 test_worker_mapping_script_parse
 test_implement_requires_opt_in
 test_no_side_effects
@@ -717,6 +772,8 @@ test_worker_coverage_filters_unmapped_repo
 test_active_work_overlap_blocks_selection
 test_active_work_different_files_allows_selection
 test_active_work_unknown_files_blocks_selection
+test_worker_invocation_uses_supported_default_model
+test_worker_timeout_is_configurable
 
 echo ""
 echo "================================================================"

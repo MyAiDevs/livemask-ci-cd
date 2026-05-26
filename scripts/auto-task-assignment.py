@@ -57,6 +57,8 @@ DEFAULT_STATE_DIR = REPO_ROOT / ".local-dev/auto-task-assignment"
 DEFAULT_EVIDENCE_DIR = REPO_ROOT / ".cursor-worker/auto-task-assignment"
 DEFAULT_LEASE_OWNER = "ci-cd-auto-task-assignment"
 DEFAULT_PLANNER_LOOKAHEAD = 50
+DEFAULT_CURSOR_SDK_MODEL = "default"
+DEFAULT_WORKER_TIMEOUT_SECONDS = 1800
 
 ACTIVE_LEASE_STATUSES = {"active"}
 
@@ -294,11 +296,39 @@ def acquire_lease(
         leases = []
 
     expires_at = now() + dt.timedelta(hours=expires_in_hours)
+    existing_entry: dict[str, Any] | None = None
+    for lease in leases:
+        if not isinstance(lease, dict):
+            continue
+        if (
+            lease.get("task_id") == task_id
+            and lease.get("repo") == repo
+            and lease.get("lease_owner") == lease_owner
+            and str(lease.get("status", "")).lower() in ACTIVE_LEASE_STATUSES
+        ):
+            existing_entry = lease
+            break
+
+    if existing_entry is not None:
+        existing_entry.update({
+            "branch": branch,
+            "expected_files": expected_files or ["*"],
+            "expires_at": iso(expires_at),
+            "ended_at": "",
+            "depends_on": existing_entry.get("depends_on", []),
+            "blocked_by": existing_entry.get("blocked_by", []),
+            "status": "active",
+        })
+        data["leases"] = leases
+        data["updated_at"] = iso()
+        write_json(lease_file, data)
+        return existing_entry
+
     entry = {
         "task_id": task_id,
         "repo": repo,
         "branch": branch,
-        "expected_files": expected_files or [],
+        "expected_files": expected_files or ["*"],
         "lease_owner": lease_owner,
         "started_at": iso(),
         "expires_at": iso(expires_at),
@@ -421,6 +451,7 @@ def dispatch(
     evidence_dir: pathlib.Path,
     confirm_implement: bool,
     json_output: bool,
+    worker_timeout_seconds: int,
     skip_worker_invoke: bool = False,
 ) -> int:
     planner_path = docs_dir / "scripts/plan-next-tasks.py"
@@ -602,6 +633,7 @@ def dispatch(
                 try:
                     env = os.environ.copy()
                     env.setdefault("CURSOR_WORKER_MODE", mode)
+                    env.setdefault("CURSOR_SDK_MODEL", DEFAULT_CURSOR_SDK_MODEL)
                     env["WORKER_HARNESS_TASK_ID"] = tid
 
                     proc = subprocess.run(
@@ -609,7 +641,7 @@ def dispatch(
                         cwd=str(worker_path.parent.parent),
                         capture_output=True,
                         text=True,
-                        timeout=60,
+                        timeout=worker_timeout_seconds,
                         env=env,
                     )
                     evidence_data["worker_exit_code"] = proc.returncode
@@ -784,6 +816,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Skip actual worker invocation (for testing).",
     )
     parser.add_argument(
+        "--worker-timeout-seconds",
+        type=int,
+        default=DEFAULT_WORKER_TIMEOUT_SECONDS,
+        help=f"Timeout for worker subprocesses (default: {DEFAULT_WORKER_TIMEOUT_SECONDS}).",
+    )
+    parser.add_argument(
         "--confirm-implement",
         action="store_true",
         help="Required to confirm implement-for-review mode.",
@@ -844,6 +882,7 @@ def main(argv: list[str]) -> int:
         evidence_dir=args.evidence_dir,
         confirm_implement=args.confirm_implement,
         json_output=args.json,
+        worker_timeout_seconds=args.worker_timeout_seconds,
         skip_worker_invoke=args.skip_worker_invoke,
     )
 
