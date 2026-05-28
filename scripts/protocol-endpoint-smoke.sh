@@ -53,8 +53,10 @@ API_BASE="http://127.0.0.1:${BACKEND_HTTP_PORT}"
 JOB_SERVICE_URL="http://127.0.0.1:${JOB_SERVICE_PORT}"
 DB_SERVICE_NAME="${LIVEMASK_DB_SERVICE:-}"
 DB_SERVICE_REACHABLE=false
+DB_CONTAINER_NAME="${LIVEMASK_DB_CONTAINER:-}"
 # Optional: force eligibility probe to use an existing real node from admin.
 SMOKE_NODE_ID_OVERRIDE="${LIVEMASK_SMOKE_NODE_ID:-}"
+SMOKE_NODE_SECRET_HASH_OVERRIDE="${LIVEMASK_SMOKE_NODE_SECRET_HASH:-}"
 
 FAILED=0
 SUMMARY_LINES=()
@@ -128,10 +130,15 @@ first_non_empty_json() {
 }
 
 pg_exec() {
-  if [[ -z "${DB_SERVICE_NAME}" || "${DB_SERVICE_REACHABLE}" != "true" ]]; then
-    return 1
+  if [[ "${DB_SERVICE_REACHABLE}" == "true" && -n "${DB_SERVICE_NAME}" ]]; then
+    docker compose -f "${COMPOSE_FILE}" exec -T "${DB_SERVICE_NAME}" psql -U livemask -tA "$@" 2>/dev/null || true
+    return 0
   fi
-  docker compose -f "${COMPOSE_FILE}" exec -T "${DB_SERVICE_NAME}" psql -U livemask -tA "$@" 2>/dev/null || true
+  if [[ -n "${DB_CONTAINER_NAME}" ]]; then
+    docker exec "${DB_CONTAINER_NAME}" psql -U livemask -tA "$@" 2>/dev/null || true
+    return 0
+  fi
+  return 1
 }
 
 detect_db_service() {
@@ -162,18 +169,30 @@ detect_db_service() {
 }
 
 init_db_probe() {
+  # 1) Preferred: compose service exec
   if ! detect_db_service; then
-    echo "  INFO: DB probe disabled (no known DB service in compose file)"
     DB_SERVICE_REACHABLE=false
-    return
+  else
+    if docker compose -f "${COMPOSE_FILE}" exec -T "${DB_SERVICE_NAME}" psql -U livemask -tA -c "SELECT 1" >/dev/null 2>&1; then
+      DB_SERVICE_REACHABLE=true
+      echo "  INFO: DB probe enabled via service=${DB_SERVICE_NAME}"
+      return
+    fi
+    DB_SERVICE_REACHABLE=false
   fi
-  if docker compose -f "${COMPOSE_FILE}" exec -T "${DB_SERVICE_NAME}" psql -U livemask -tA -c "SELECT 1" >/dev/null 2>&1; then
-    DB_SERVICE_REACHABLE=true
-    echo "  INFO: DB probe enabled via service=${DB_SERVICE_NAME}"
-    return
+
+  # 2) Fallback: direct container exec (for local runtime where compose service
+  # name may differ from postgres/db).
+  if [[ -z "${DB_CONTAINER_NAME}" ]]; then
+    DB_CONTAINER_NAME=$(docker ps --format '{{.Names}}' | grep -E 'postgres' | head -n1 || true)
   fi
-  DB_SERVICE_REACHABLE=false
-  echo "  INFO: DB probe disabled (service ${DB_SERVICE_NAME} not reachable)"
+  if [[ -n "${DB_CONTAINER_NAME}" ]]; then
+    if docker exec "${DB_CONTAINER_NAME}" psql -U livemask -tA -c "SELECT 1" >/dev/null 2>&1; then
+      echo "  INFO: DB probe enabled via container=${DB_CONTAINER_NAME}"
+      return
+    fi
+  fi
+  echo "  INFO: DB probe disabled (service/container not reachable)"
 }
 
 security_check() {
@@ -884,23 +903,41 @@ echo ""
 echo "--- [11] NodeAgent Pulls Assignment (HMAC) ---"
 
 # Register and activate a node for HMAC tests
-echo "  Registering smoke node..."
-NODE_REG=$(curl -sS --max-time 5 -X POST "${API_BASE}/internal/agent/register" \
-  -H "Content-Type: application/json" \
-  -d "{\"node_name\":\"proto-smoke-node-${SUFFIX}\",\"agent_version\":\"smoke-1.0.0\"}") || true
-NODE_ID=$(echo "${NODE_REG}" | quiet_json "node_id")
-NODE_SECRET=$(echo "${NODE_REG}" | quiet_json "node_secret")
-NODE_STATUS=$(echo "${NODE_REG}" | quiet_json "status")
-if [[ -z "${NODE_ID}" || -z "${NODE_SECRET}" ]]; then
-  fail "Node registration — no node_id/node_secret"
+NODE_ID=""
+NODE_SECRET=""
+NODE_STATUS=""
+NODE_SECRET_HASH=""
+if [[ -n "${SMOKE_NODE_ID_OVERRIDE}" ]]; then
+  NODE_ID="${SMOKE_NODE_ID_OVERRIDE}"
+  NODE_STATUS=$(curl -sS --max-time 5 "${API_BASE}/admin/api/v1/nodes/${NODE_ID}" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" 2>/dev/null | quiet_json "status" || true)
+  NODE_SECRET_HASH="${SMOKE_NODE_SECRET_HASH_OVERRIDE}"
+  if [[ -z "${NODE_SECRET_HASH}" ]]; then
+    NODE_SECRET_HASH=$(pg_exec -c "SELECT node_secret_hash FROM nodes WHERE id='${NODE_ID}' LIMIT 1" | tr -d '[:space:]' || true)
+  fi
+  if [[ -z "${NODE_SECRET_HASH}" ]]; then
+    fail "Real node ${NODE_ID} selected but node_secret_hash unavailable (set LIVEMASK_SMOKE_NODE_SECRET_HASH or enable DB probe)"
+  else
+    pass "Using real node: id=${NODE_ID} status=${NODE_STATUS:-unknown}"
+  fi
 else
-  pass "Node registered: id=${NODE_ID} status=${NODE_STATUS}"
+  echo "  Registering smoke node..."
+  NODE_REG=$(curl -sS --max-time 5 -X POST "${API_BASE}/internal/agent/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"node_name\":\"proto-smoke-node-${SUFFIX}\",\"agent_version\":\"smoke-1.0.0\"}") || true
+  NODE_ID=$(echo "${NODE_REG}" | quiet_json "node_id")
+  NODE_SECRET=$(echo "${NODE_REG}" | quiet_json "node_secret")
+  NODE_STATUS=$(echo "${NODE_REG}" | quiet_json "status")
+  if [[ -z "${NODE_ID}" || -z "${NODE_SECRET}" ]]; then
+    fail "Node registration — no node_id/node_secret"
+  else
+    pass "Node registered: id=${NODE_ID} status=${NODE_STATUS}"
+    NODE_SECRET_HASH=$(echo -n "${NODE_SECRET}" | sha256sum | cut -d' ' -f1)
+  fi
 fi
 
-NODE_SECRET_HASH=$(echo -n "${NODE_SECRET}" | sha256sum | cut -d' ' -f1)
-
 # Activate the node
-if [[ -n "${NODE_ID}" && -n "${ADMIN_TOKEN}" ]]; then
+if [[ -n "${NODE_ID}" && -n "${ADMIN_TOKEN}" && -z "${SMOKE_NODE_ID_OVERRIDE}" ]]; then
   curl -sS --max-time 5 -X POST "${API_BASE}/admin/api/v1/nodes/${NODE_ID}/approve" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}" \

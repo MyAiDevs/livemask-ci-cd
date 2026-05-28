@@ -35,6 +35,7 @@ source "${SCRIPT_DIR}/lib/base_service.sh"
 
 COMPOSE_FILE="${COMPOSE_FILE:-infra/docker-compose.staging.yml}"
 API_BASE="$(lm_backend_base_url)"
+DB_CONTAINER_NAME="${LIVEMASK_DB_CONTAINER:-}"
 
 FAILED=0
 PASS_COUNT=0
@@ -99,7 +100,15 @@ print(current)
 }
 
 pg_exec() {
-  docker compose -f "${COMPOSE_FILE}" exec -T postgres psql -U livemask -tA "$@" 2>/dev/null || true
+  docker compose -f "${COMPOSE_FILE}" exec -T postgres psql -U livemask -tA "$@" 2>/dev/null || {
+    local db_container="${DB_CONTAINER_NAME}"
+    if [[ -z "${db_container}" ]]; then
+      db_container=$(docker ps --format '{{.Names}}' | grep -E 'postgres' | head -n1 || true)
+    fi
+    if [[ -n "${db_container}" ]]; then
+      docker exec "${db_container}" psql -U livemask -tA "$@" 2>/dev/null || true
+    fi
+  }
 }
 
 cleanup_pg() {
@@ -591,7 +600,7 @@ if [[ -n "${REAL_NODE_ID}" ]]; then
     NODE_SECRET_HASH=$(pg_exec -c "SELECT node_secret_hash FROM nodes WHERE id='${NODE_ID}' LIMIT 1" | tr -d '[:space:]' || true)
   fi
   if [[ -z "${NODE_SECRET_HASH}" ]]; then
-    skip "Using real node ${NODE_ID} but node_secret_hash unavailable; HMAC heartbeat checks will be skipped"
+    fail "Using real node ${NODE_ID} but node_secret_hash unavailable; set LIVEMASK_SMOKE_NODE_SECRET_HASH or ensure DB probe access"
   fi
   pass "Using real smoke node: id=${NODE_ID} status=${NODE_STATUS:-unknown}"
 else
