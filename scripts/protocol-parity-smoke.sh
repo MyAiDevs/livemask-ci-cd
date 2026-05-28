@@ -118,44 +118,76 @@ fi
 echo ""
 echo "--- [3] Protocol Capability Endpoint ---"
 CAP_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
-  "${API_BASE}/admin/api/v1/protocol-capabilities" \
+  "${API_BASE}/admin/api/v1/protocol/capabilities" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" 2>/dev/null || echo "000")
 if [[ "${CAP_HTTP}" == "200" ]]; then
-  CAP_RESP=$(curl -sS --max-time 5 "${API_BASE}/admin/api/v1/protocol-capabilities" \
+  CAP_RESP=$(curl -sS --max-time 5 "${API_BASE}/admin/api/v1/protocol/capabilities" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}" 2>/dev/null || echo "{}")
   pass "Protocol capabilities: HTTP 200"
-  security_check "admin/protocol-capabilities" "${CAP_RESP}" || true
+  security_check "admin/protocol/capabilities" "${CAP_RESP}" || true
 else
-  # Try capability summary endpoint
-  CAP_SUM_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
-    "${API_BASE}/admin/api/v1/protocol-capabilities/summary" \
+  # Legacy fallbacks.
+  CAP_LEGACY_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+    "${API_BASE}/admin/api/v1/protocol-capabilities" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}" 2>/dev/null || echo "000")
-  if [[ "${CAP_SUM_HTTP}" == "200" ]]; then
-    CAP_RESP=$(curl -sS --max-time 5 "${API_BASE}/admin/api/v1/protocol-capabilities/summary" \
+  if [[ "${CAP_LEGACY_HTTP}" == "200" ]]; then
+    CAP_RESP=$(curl -sS --max-time 5 "${API_BASE}/admin/api/v1/protocol-capabilities" \
       -H "Authorization: Bearer ${ADMIN_TOKEN}" 2>/dev/null || echo "{}")
-    pass "Protocol capabilities summary: HTTP 200"
-    security_check "admin/protocol-capabilities/summary" "${CAP_RESP}" || true
+    pass "Protocol capabilities (legacy): HTTP 200"
+    security_check "admin/protocol-capabilities" "${CAP_RESP}" || true
   else
-    skip "Protocol capabilities: HTTP ${CAP_HTTP} and summary: HTTP ${CAP_SUM_HTTP}"
+    CAP_SUM_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+      "${API_BASE}/admin/api/v1/protocol-capabilities/summary" \
+      -H "Authorization: Bearer ${ADMIN_TOKEN}" 2>/dev/null || echo "000")
+    if [[ "${CAP_SUM_HTTP}" == "200" ]]; then
+      CAP_RESP=$(curl -sS --max-time 5 "${API_BASE}/admin/api/v1/protocol-capabilities/summary" \
+        -H "Authorization: Bearer ${ADMIN_TOKEN}" 2>/dev/null || echo "{}")
+      pass "Protocol capabilities summary (legacy): HTTP 200"
+      security_check "admin/protocol-capabilities/summary" "${CAP_RESP}" || true
+    else
+      skip "Protocol capabilities unavailable: fleet=${CAP_HTTP}, legacy=${CAP_LEGACY_HTTP}, summary=${CAP_SUM_HTTP}"
+    fi
   fi
 fi
 
-# [4] NodeAgent config/status for protocol_capabilities
+# [4] NodeAgent status for protocol_capabilities
 echo ""
 echo "--- [4] NodeAgent Protocol Capabilities ---"
 NA_STATUS_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
-  "${NODEAGENT_API}/config/status" 2>/dev/null || echo "000")
+  "${NODEAGENT_API}/agent/status" 2>/dev/null || echo "000")
 if [[ "${NA_STATUS_HTTP}" == "200" ]]; then
-  NA_RESP=$(curl -sS --max-time 5 "${NODEAGENT_API}/config/status" 2>/dev/null || echo "{}")
-  NA_PROTOS=$(echo "${NA_RESP}" | quiet_json "protocol_capabilities" || echo "")
-  if [[ -n "${NA_PROTOS}" && "${NA_PROTOS}" != "None" ]]; then
-    pass "NodeAgent reports protocol_capabilities: ${NA_PROTOS}"
+  NA_RESP=$(curl -sS --max-time 5 "${NODEAGENT_API}/agent/status" 2>/dev/null || echo "{}")
+  NA_CAP_COUNT=$(echo "${NA_RESP}" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print(0); raise SystemExit(0)
+caps = d.get('protocol_capabilities', [])
+print(len(caps) if isinstance(caps, list) else 0)
+" 2>/dev/null || echo "0")
+  if [[ "${NA_CAP_COUNT}" =~ ^[0-9]+$ ]] && [[ "${NA_CAP_COUNT}" -gt 0 ]]; then
+    pass "NodeAgent reports protocol_capabilities via /agent/status: count=${NA_CAP_COUNT}"
   else
-    skip "NodeAgent protocol_capabilities not in config/status response"
+    skip "NodeAgent protocol_capabilities missing/empty in /agent/status"
   fi
-  security_check "nodeagent/config/status" "${NA_RESP}" || true
+  security_check "nodeagent/agent/status" "${NA_RESP}" || true
 else
-  skip "NodeAgent config/status: HTTP ${NA_STATUS_HTTP} (not accessible)"
+  # Backward-compatible fallback for older agents.
+  NA_CFG_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+    "${NODEAGENT_API}/config/status" 2>/dev/null || echo "000")
+  if [[ "${NA_CFG_HTTP}" == "200" ]]; then
+    NA_RESP=$(curl -sS --max-time 5 "${NODEAGENT_API}/config/status" 2>/dev/null || echo "{}")
+    NA_PROTOS=$(echo "${NA_RESP}" | quiet_json "protocol_capabilities" || echo "")
+    if [[ -n "${NA_PROTOS}" && "${NA_PROTOS}" != "None" ]]; then
+      pass "NodeAgent reports protocol_capabilities via /config/status (legacy)"
+    else
+      skip "NodeAgent protocol_capabilities not in /agent/status and /config/status"
+    fi
+    security_check "nodeagent/config/status" "${NA_RESP}" || true
+  else
+    skip "NodeAgent status endpoints unavailable: /agent/status=${NA_STATUS_HTTP}, /config/status=${NA_CFG_HTTP}"
+  fi
 fi
 
 # [5] Reserved protocol blocking check
