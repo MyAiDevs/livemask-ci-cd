@@ -1,0 +1,92 @@
+name: App Hysteria2 AAR Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_ref:
+        description: livemask-app ref/branch to build
+        required: false
+        default: dev
+      verify_only:
+        description: Skip gomobile build and only verify existing artifacts
+        required: false
+        default: "false"
+      skip_debug_build:
+        description: Skip Android :app:assembleDebug after AAR generation
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  build-aar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout livemask-ci-cd
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
+
+      - name: Checkout livemask-app
+        uses: actions/checkout@v4
+        with:
+          repository: MyAiDevs/livemask-app
+          ref: ${{ inputs.app_ref }}
+          path: livemask-app
+          token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "ndk;28.2.13676358"
+
+      - name: Install gomobile and gobind
+        run: |
+          GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}" go install golang.org/x/mobile/cmd/gomobile@latest
+          GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}" go install golang.org/x/mobile/cmd/gobind@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Bash syntax check
+        run: bash -n scripts/app-hysteria2-aar-build-smoke.sh
+
+      - name: Build/verify Hysteria2 AAR
+        env:
+          LIVEMASK_APP_REPO: ${{ github.workspace }}/livemask-app
+        run: |
+          ARGS=()
+          if [[ "${{ inputs.verify_only }}" == "true" ]]; then
+            ARGS+=(--verify-only)
+          fi
+          if [[ "${{ inputs.skip_debug_build }}" == "true" ]]; then
+            ARGS+=(--skip-debug-build)
+          fi
+          bash scripts/app-hysteria2-aar-build-smoke.sh "${ARGS[@]}"
+
+      - name: Upload AAR artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: h2mobile-aar
+          path: |
+            livemask-app/plugins/flutter_vpn/android/libs/h2mobile-release.aar
+            livemask-app/plugins/flutter_vpn/android/libs/h2mobile-classes.jar
+          if-no-files-found: error
+          retention-days: 7
