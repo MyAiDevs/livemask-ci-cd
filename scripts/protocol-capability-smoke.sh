@@ -530,10 +530,10 @@ blocked_count = sum(1 for t in reserved if t.get('rollout_blocked')==True or t.g
 print(f'reserved={len(reserved)} has_field={\"yes\" if has_blocked_field else \"no\"} blocked={blocked_count} all={all_blocked}')
 " 2>/dev/null || echo "")
 
-  RESERVED_COUNT=$(echo "${BLOCKED_CHECK}" | grep -oP 'reserved=\K\d+' || echo "0")
-  HAS_FIELD=$(echo "${BLOCKED_CHECK}" | grep -oP 'has_field=\K\w+' || echo "no")
-  BLOCKED_COUNT=$(echo "${BLOCKED_CHECK}" | grep -oP 'blocked=\K\d+' || echo "0")
-  ALL_BLOCKED=$(echo "${BLOCKED_CHECK}" | grep -oP 'all=\K\w+' || echo "false")
+  RESERVED_COUNT=$(echo "${BLOCKED_CHECK}" | awk '{for(i=1;i<=NF;i++) if($i ~ /^reserved=/){split($i,a,"="); print a[2]}}' || echo "0")
+  HAS_FIELD=$(echo "${BLOCKED_CHECK}" | awk '{for(i=1;i<=NF;i++) if($i ~ /^has_field=/){split($i,a,"="); print a[2]}}' || echo "no")
+  BLOCKED_COUNT=$(echo "${BLOCKED_CHECK}" | awk '{for(i=1;i<=NF;i++) if($i ~ /^blocked=/){split($i,a,"="); print a[2]}}' || echo "0")
+  ALL_BLOCKED=$(echo "${BLOCKED_CHECK}" | awk '{for(i=1;i<=NF;i++) if($i ~ /^all=/){split($i,a,"="); print a[2]}}' || echo "false")
 
   if [[ "${RESERVED_COUNT}" -gt 0 ]]; then
     if [[ "${HAS_FIELD}" == "yes" ]]; then
