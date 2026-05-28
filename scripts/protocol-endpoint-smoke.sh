@@ -43,11 +43,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-COMPOSE_FILE="${COMPOSE_FILE:-infra/docker-compose.staging.yml}"
+COMPOSE_FILE="${COMPOSE_FILE:-${REPO_DIR}/infra/docker-compose.staging.yml}"
+if [[ "${COMPOSE_FILE}" != /* ]]; then
+  COMPOSE_FILE="${REPO_DIR}/${COMPOSE_FILE}"
+fi
 BACKEND_HTTP_PORT="${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
 JOB_SERVICE_PORT="${LIVEMASK_JOB_SERVICE_PORT:-19191}"
 API_BASE="http://127.0.0.1:${BACKEND_HTTP_PORT}"
 JOB_SERVICE_URL="http://127.0.0.1:${JOB_SERVICE_PORT}"
+DB_SERVICE_NAME="${LIVEMASK_DB_SERVICE:-}"
+DB_SERVICE_REACHABLE=false
 
 FAILED=0
 SUMMARY_LINES=()
@@ -121,7 +126,52 @@ first_non_empty_json() {
 }
 
 pg_exec() {
-  docker compose -f "${COMPOSE_FILE}" exec -T postgres psql -U livemask -tA "$@" 2>/dev/null || true
+  if [[ -z "${DB_SERVICE_NAME}" || "${DB_SERVICE_REACHABLE}" != "true" ]]; then
+    return 1
+  fi
+  docker compose -f "${COMPOSE_FILE}" exec -T "${DB_SERVICE_NAME}" psql -U livemask -tA "$@" 2>/dev/null || true
+}
+
+detect_db_service() {
+  if [[ ! -f "${COMPOSE_FILE}" ]]; then
+    return 1
+  fi
+  local services=""
+  services=$(docker compose -f "${COMPOSE_FILE}" config --services 2>/dev/null || echo "")
+  if [[ -z "${services}" ]]; then
+    return 1
+  fi
+
+  if [[ -n "${DB_SERVICE_NAME}" ]]; then
+    if echo "${services}" | grep -Fxq "${DB_SERVICE_NAME}"; then
+      return 0
+    fi
+    return 1
+  fi
+
+  local candidate=""
+  for candidate in postgres db database pgsql; do
+    if echo "${services}" | grep -Fxq "${candidate}"; then
+      DB_SERVICE_NAME="${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+init_db_probe() {
+  if ! detect_db_service; then
+    echo "  INFO: DB probe disabled (no known DB service in compose file)"
+    DB_SERVICE_REACHABLE=false
+    return
+  fi
+  if docker compose -f "${COMPOSE_FILE}" exec -T "${DB_SERVICE_NAME}" psql -U livemask -tA -c "SELECT 1" >/dev/null 2>&1; then
+    DB_SERVICE_REACHABLE=true
+    echo "  INFO: DB probe enabled via service=${DB_SERVICE_NAME}"
+    return
+  fi
+  DB_SERVICE_REACHABLE=false
+  echo "  INFO: DB probe disabled (service ${DB_SERVICE_NAME} not reachable)"
 }
 
 security_check() {
@@ -209,6 +259,7 @@ trap 'rm -rf "${SMOKE_TMPDIR}"' EXIT
 
 TIMESTAMP=$(date +%s)
 SUFFIX="proto-${TIMESTAMP}"
+init_db_probe
 
 # ── Event data seed ──────────────────────────────────────────────────────────
 # Backend's protocol-events endpoint requires a real template_assignment
@@ -915,34 +966,79 @@ echo "--- [11b] Verification: Assignment DB Record ---"
 
 ASSIGN_DB_FOUND=false
 if [[ -n "${NODE_ID}" ]]; then
-  # Check node_assignment_states table
-  ASSIGN_DB_COUNT=$(pg_exec -c "SELECT count(*) FROM node_assignment_states WHERE node_id='${NODE_ID}'" 2>/dev/null | head -1 | tr -d ' \t' || echo "0")
-  if [[ "${ASSIGN_DB_COUNT}" -gt 0 ]]; then
-    ASSIGN_DB_TEMPLATE=$(pg_exec -c "SELECT template_name FROM node_assignment_states WHERE node_id='${NODE_ID}' ORDER BY updated_at DESC LIMIT 1" 2>/dev/null | head -1 | tr -d ' \t' || echo "")
-    pass "Assignment DB record (node_assignment_states): count=${ASSIGN_DB_COUNT}, template=${ASSIGN_DB_TEMPLATE:-N/A}"
-    ASSIGN_DB_FOUND=true
-  fi
-
-  # Check rollout_events table as alternative
-  if [[ "${ASSIGN_DB_FOUND}" != "true" ]]; then
-    ASSIGN_DB_COUNT_R=$(pg_exec -c "SELECT count(*) FROM rollout_events WHERE node_id='${NODE_ID}'" 2>/dev/null | head -1 | tr -d ' \t' || echo "0")
-    if [[ "${ASSIGN_DB_COUNT_R}" -gt 0 ]]; then
-      pass "Assignment via rollout_events: count=${ASSIGN_DB_COUNT_R}"
+  if [[ "${DB_SERVICE_REACHABLE}" == "true" ]]; then
+    # Check node_assignment_states table
+    ASSIGN_DB_COUNT=$(pg_exec -c "SELECT count(*) FROM node_assignment_states WHERE node_id='${NODE_ID}'" 2>/dev/null | head -1 | tr -d ' \t' || echo "0")
+    if [[ "${ASSIGN_DB_COUNT}" -gt 0 ]]; then
+      ASSIGN_DB_TEMPLATE=$(pg_exec -c "SELECT template_name FROM node_assignment_states WHERE node_id='${NODE_ID}' ORDER BY updated_at DESC LIMIT 1" 2>/dev/null | head -1 | tr -d ' \t' || echo "")
+      pass "Assignment DB record (node_assignment_states): count=${ASSIGN_DB_COUNT}, template=${ASSIGN_DB_TEMPLATE:-N/A}"
       ASSIGN_DB_FOUND=true
+    fi
+
+    # Check rollout_events table as alternative
+    if [[ "${ASSIGN_DB_FOUND}" != "true" ]]; then
+      ASSIGN_DB_COUNT_R=$(pg_exec -c "SELECT count(*) FROM rollout_events WHERE node_id='${NODE_ID}'" 2>/dev/null | head -1 | tr -d ' \t' || echo "0")
+      if [[ "${ASSIGN_DB_COUNT_R}" -gt 0 ]]; then
+        pass "Assignment via rollout_events: count=${ASSIGN_DB_COUNT_R}"
+        ASSIGN_DB_FOUND=true
+      fi
+    fi
+
+    # Check template_versions as further alternative
+    if [[ "${ASSIGN_DB_FOUND}" != "true" && -n "${TEMPLATE_ID:-}" ]]; then
+      VERS_COUNT=$(pg_exec -c "SELECT count(*) FROM template_versions WHERE template_id='${TEMPLATE_ID}'" 2>/dev/null | head -1 | tr -d ' \t' || echo "0")
+      if [[ "${VERS_COUNT}" -gt 0 ]]; then
+        pass "Assignment DB: template versions exist (count=${VERS_COUNT})"
+        ASSIGN_DB_FOUND=true
+      fi
     fi
   fi
 
-  # Check template_versions as further alternative
-  if [[ "${ASSIGN_DB_FOUND}" != "true" && -n "${TEMPLATE_ID:-}" ]]; then
-    VERS_COUNT=$(pg_exec -c "SELECT count(*) FROM template_versions WHERE template_id='${TEMPLATE_ID}'" 2>/dev/null | head -1 | tr -d ' \t' || echo "0")
-    if [[ "${VERS_COUNT}" -gt 0 ]]; then
-      pass "Assignment DB: template versions exist (count=${VERS_COUNT})"
-      ASSIGN_DB_FOUND=true
+  # DB may be unavailable in some local runtimes; verify via Admin API as fallback.
+  if [[ "${ASSIGN_DB_FOUND}" != "true" && -n "${ADMIN_TOKEN:-}" ]]; then
+    NODE_ASSIGN_HTTP=$(curl -sS --max-time 5 -o "${SMOKE_TMPDIR}/node_assignment_admin.json" -w "%{http_code}" \
+      "${API_BASE}/admin/api/v1/nodes/${NODE_ID}/protocol-assignments" \
+      -H "Authorization: Bearer ${ADMIN_TOKEN}" 2>/dev/null || true)
+    if [[ "${NODE_ASSIGN_HTTP}" == "200" ]]; then
+      NODE_ASSIGN_COUNT=$(python3 - "${SMOKE_TMPDIR}/node_assignment_admin.json" <<'PY'
+import json,sys
+p=sys.argv[1]
+try:
+    with open(p, "r", encoding="utf-8") as f:
+        data=json.load(f)
+except Exception:
+    print(0)
+    raise SystemExit(0)
+for key in ("assignments","items","data","node_assignments"):
+    v=data.get(key) if isinstance(data, dict) else None
+    if isinstance(v, list):
+        print(len(v))
+        raise SystemExit(0)
+if isinstance(data, dict):
+    cur = data.get("current")
+    tgt = data.get("target")
+    if isinstance(cur, dict) and len(cur) > 0:
+        print(1)
+        raise SystemExit(0)
+    if isinstance(tgt, dict) and len(tgt) > 0:
+        print(1)
+        raise SystemExit(0)
+print(0)
+PY
+)
+      if [[ "${NODE_ASSIGN_COUNT}" -gt 0 ]]; then
+        pass "Assignment API record (admin node protocol-assignments): count=${NODE_ASSIGN_COUNT}"
+        ASSIGN_DB_FOUND=true
+      fi
     fi
   fi
 
   if [[ "${ASSIGN_DB_FOUND}" != "true" ]]; then
-    skip "Assignment DB record: no node_assignment_states or rollout_events found for node (table may need migration)"
+    if [[ "${DB_SERVICE_REACHABLE}" == "true" ]]; then
+      skip "Assignment record: no node_assignment_states/rollout_events row and no admin node assignment view"
+    else
+      skip "Assignment record: DB probe unavailable and admin node assignment view returned empty"
+    fi
   fi
 else
   skip "Assignment DB record: no node id available"
