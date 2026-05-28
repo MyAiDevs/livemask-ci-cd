@@ -931,26 +931,38 @@ if [[ "${HAVE_TEMPLATES}" == "true" ]]; then
 import sys,json
 items=json.load(sys.stdin)
 for t in items:
-    tid = t.get('id','')
+    tid = t.get('template_id', t.get('id',''))
     tname = t.get('name','')
     tproto = t.get('protocol',t.get('protocol_profile','')).lower()
-    ttype = t.get('template_type','')
-    tis_reserved = t.get('is_reserved',False) or ttype in ('builtin','reserved')
-    print(f'{tid}|{tname}|{tproto}|{tis_reserved}')
+    ttype = str(t.get('template_type','')).lower()
+    rollout_blocked = bool(t.get('rollout_blocked', False))
+    enabled = t.get('enabled', True)
+    is_reserved = bool(
+        t.get('is_reserved', False)
+        or rollout_blocked
+        or (enabled is False)
+        or ('reserved' in tname.lower())
+        or ttype == 'reserved'
+    )
+    print(f'{tid}|{tname}|{tproto}|{is_reserved}|{rollout_blocked}|{enabled}')
 " 2>/dev/null || echo "")
 
-  while IFS='|' read -r tid tname tproto tis_reserved; do
+  while IFS='|' read -r tid tname tproto tis_reserved tis_blocked tis_enabled; do
     [[ -z "${tid}" ]] && continue
     if [[ "${tis_reserved}" == "True" ]] || [[ "${tis_reserved}" == "true" ]]; then
-      RESERVED_TEMPLATE_ID="${tid}"
+      if [[ -z "${RESERVED_TEMPLATE_ID}" ]]; then
+        RESERVED_TEMPLATE_ID="${tid}"
+      fi
     fi
     # For app_pending: hysteria2
     if echo "${tproto}" | grep -q "hysteria2"; then
-      APP_PENDING_TEMPLATE_ID="${tid}"
+      if [[ "${tis_reserved}" != "True" ]] && [[ "${tis_reserved}" != "true" ]]; then
+        APP_PENDING_TEMPLATE_ID="${tid}"
+      fi
     fi
     # For implemented: mixed, socks, or tun
     if echo "${tproto}" | grep -q "mixed\|socks\|tun"; then
-      if [[ -z "${IMPLEMENTED_TEMPLATE_ID}" ]]; then
+      if [[ "${tis_reserved}" != "True" ]] && [[ "${tis_reserved}" != "true" ]] && [[ -z "${IMPLEMENTED_TEMPLATE_ID}" ]]; then
         IMPLEMENTED_TEMPLATE_ID="${tid}"
       fi
     fi
