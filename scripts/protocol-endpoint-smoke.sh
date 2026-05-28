@@ -104,6 +104,22 @@ print(current)
 " 2>/dev/null || echo ""
 }
 
+first_non_empty_json() {
+  local body="$1"
+  shift
+  local path=""
+  for path in "$@"; do
+    local value=""
+    value=$(echo "${body}" | quiet_json "${path}")
+    if [[ -n "${value}" && "${value}" != "None" && "${value}" != "null" ]]; then
+      echo "${value}"
+      return 0
+    fi
+  done
+  echo ""
+  return 0
+}
+
 pg_exec() {
   docker compose -f "${COMPOSE_FILE}" exec -T postgres psql -U livemask -tA "$@" 2>/dev/null || true
 }
@@ -614,13 +630,15 @@ EOF
     PUB_HTTP=$(echo "${PUB_RAW}" | tail -1)
     if [[ "${PUB_HTTP}" == "200" || "${PUB_HTTP}" == "201" ]]; then
       PUB_RESP=$(echo "${PUB_RAW}" | sed '$d')
-      VERSION_ID=$(echo "${PUB_RESP}" | quiet_json "id" || echo "${PUB_RESP}" | quiet_json "version_id" || echo "${PUB_RESP}" | quiet_json "data.id" || echo "")
-      if [[ -n "${VERSION_ID}" ]]; then
-        pass "Publish version (${pub_path}): HTTP ${PUB_HTTP}, version=${TEMPLATE_VERSION}"
-        HAVE_VERSION=true
-        collect_response "publish_version" "${PUB_RESP}"
-        security_check "Publish version" "${PUB_RESP}" || true
+      VERSION_ID=$(first_non_empty_json "${PUB_RESP}" "version_id" "id" "version.version_id" "version.id" "data.version_id" "data.id")
+      if [[ -z "${VERSION_ID}" ]]; then
+        # Some endpoints may return only "version" string or nested version object without id.
+        VERSION_ID=$(first_non_empty_json "${PUB_RESP}" "version")
       fi
+      pass "Publish version (${pub_path}): HTTP ${PUB_HTTP}, version=${TEMPLATE_VERSION}"
+      HAVE_VERSION=true
+      collect_response "publish_version" "${PUB_RESP}"
+      security_check "Publish version" "${PUB_RESP}" || true
       break
     fi
   done
