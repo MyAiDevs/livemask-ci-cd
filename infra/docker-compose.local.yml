@@ -57,6 +57,8 @@ services:
       DEV_USER_PASSWORD: "${DEV_USER_PASSWORD:-UserPass123!}"
       # GeoIP credential encryption (dev-only; production uses a real key)
       GEOIP_CREDENTIAL_ENCRYPTION_KEY: "${GEOIP_CREDENTIAL_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      GEOIP_UPDATE_ENABLED: "${GEOIP_UPDATE_ENABLED:-true}"
+      GEOIP_UPDATE_INTERVAL: "${GEOIP_UPDATE_INTERVAL:-24h}"
       INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:-local-dev-secret}"
       # Job Service gateway
       JOB_SERVICE_ENABLED: "${JOB_SERVICE_ENABLED:-true}"
@@ -131,6 +133,12 @@ services:
       POLL_INTERVAL_SEC: "${POLL_INTERVAL_SEC:-30}"
       SPEEDTEST_DOWNLOAD_URL: "${SPEEDTEST_DOWNLOAD_URL:-}"
       LOG_UPLOAD_ENABLED: "${LOG_UPLOAD_ENABLED:-true}"
+      GEOIP_ENABLED: "${GEOIP_ENABLED:-true}"
+      GEOIP_PROFILE: "${GEOIP_PROFILE:-country}"
+      GEOIP_FORMAT: "${GEOIP_FORMAT:-geoip2-cn-mmdb}"
+      NODEAGENT_GEOIP_PROFILE: "${NODEAGENT_GEOIP_PROFILE:-country}"
+      NODEAGENT_GEOIP_FORMAT: "${NODEAGENT_GEOIP_FORMAT:-geoip2-cn-mmdb}"
+      GEOIP_CHECK_INTERVAL_SEC: "${GEOIP_CHECK_INTERVAL_SEC:-300}"
       GOPROXY: "${GOPROXY:-https://goproxy.cn,direct}"
       GOCACHE: /workspace/.cache/go-build
       GOMODCACHE: /workspace/.cache/go/pkg/mod
