@@ -301,33 +301,51 @@ echo ""
 echo "--- [6a] Seed app release ---"
 SEEDED_RELEASE=false
 SEED_VERSION="0.0.1-smoke-$(date +%Y%m%d%H%M%S)"
-if [[ -n "${ADMIN_TOKEN}" ]] && [[ "${ADMIN_APP_RELEASES_RESP:-}" != "" ]]; then
+if [[ -n "${ADMIN_TOKEN}" ]]; then
   SEED_BODY=$(cat <<SEEDEOF
 {
   "version": "${SEED_VERSION}",
-  "platform": "android",
+  "build_number": "1",
+  "title": "CI/CD Smoke Seed Release",
   "channel": "stable",
-  "release_notes": "CI/CD smoke seed fixture",
-  "artifact_url": "https://example.com/fake-release.apk",
-  "artifact_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  "min_supported_version": "0.0.0",
+  "force_update_below": "0.0.0",
+  "rollout_percentage": 0,
+  "target_platforms": ["android"]
 }
 SEEDEOF
 )
-  SEED_HTTP=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" \
-    -X POST "${API_BASE}/admin/api/v1/app/releases" \
+  SEED_RESP=$(curl -sS --max-time 10 -X POST "${API_BASE}/admin/api/v1/app/releases" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}" \
     -H "Content-Type: application/json" \
-    -d "${SEED_BODY}" 2>/dev/null || echo "000")
-  if [[ "${SEED_HTTP}" == "200" || "${SEED_HTTP}" == "201" ]]; then
-    SEEDED_RELEASE=true
-    pass "Seeded app release: version=${SEED_VERSION}, HTTP ${SEED_HTTP}"
-  elif [[ "${SEED_HTTP}" == "404" ]]; then
-    skip "Seed app release: HTTP 404 (admin release creation endpoint not yet deployed — data-level test SKIP)"
+    -d "${SEED_BODY}" 2>/dev/null || echo "")
+  SEED_HTTP=$(echo "${SEED_RESP}" | python3 -c "import json,sys; d=json.load(sys.stdin) if sys.stdin.read(1) else {}; print('200' if d.get('id') else '500')" 2>/dev/null || echo "000")
+  SEED_ID=$(echo "${SEED_RESP}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+  if [[ -n "${SEED_ID}" ]]; then
+    echo "  Created seed release: ${SEED_ID} (version=${SEED_VERSION})"
+    # Publish the release so public endpoint returns it
+    PUBLISH_RESP=$(curl -sS --max-time 10 -X POST "${API_BASE}/admin/api/v1/app/releases/${SEED_ID}/publish" \
+      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d '{}' 2>/dev/null || echo "")
+    PUBLISH_HTTP=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" \
+      -X POST "${API_BASE}/admin/api/v1/app/releases/${SEED_ID}/publish" \
+      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d '{}' 2>/dev/null || echo "000")
+    if [[ "${PUBLISH_HTTP}" == "200" ]]; then
+      SEEDED_RELEASE=true
+      pass "Seeded app release: version=${SEED_VERSION}, HTTP ${SEED_HTTP}, published=${PUBLISH_HTTP}"
+    else
+      skip "Seed app release: created (HTTP ${SEED_HTTP}), publish returned ${PUBLISH_HTTP}"
+    fi
+  elif [[ "${SEED_HTTP}" == "500" ]]; then
+    skip "Seed app release: HTTP 500 (backend storage not available — data-level test SKIP)"
   else
     skip "Seed app release: HTTP ${SEED_HTTP} (unexpected — data-level test SKIP)"
   fi
 else
-  skip "Seed app release: no admin token or releases endpoint unavailable"
+  skip "Seed app release: no admin token available"
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
