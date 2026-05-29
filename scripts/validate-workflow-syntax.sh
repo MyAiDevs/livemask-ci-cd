@@ -9,7 +9,10 @@ ruby <<'RUBY'
 require "yaml"
 
 paths = Dir.glob("**/*.{yml,yaml}", File::FNM_DOTMATCH).reject do |path|
-  path.start_with?(".git/")
+  path.start_with?(".git/") ||
+    path.start_with?(".worktrees/") ||
+    path.start_with?(".cursor-worker/") ||
+    path.start_with?("infra/_build_deps/")
 end.sort
 
 abort("No YAML files found") if paths.empty?

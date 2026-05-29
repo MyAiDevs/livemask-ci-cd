@@ -10,3 +10,6 @@ __pycache__/
 *.pyc
 # Worker harness generated artifacts
 .cursor-worker/
+
+# Local task/integration worktrees created by merge guards and runner tooling.
+.worktrees/
