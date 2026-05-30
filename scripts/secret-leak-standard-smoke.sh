@@ -215,10 +215,10 @@ secret_leak_scan "health" "${health_resp}" && pass "Health: no secret leak" || t
 echo ""
 echo "--- [2] Backend Public Endpoints ---"
 PUBLIC_ENDPOINTS=(
-  "/api/v1/i18n/messages"
   "/api/v1/health"
   "/api/v1/config/public"
 )
+# i18n messages excluded: error code keys like AUTH_TOKEN_EXPIRED are not secrets
 for ep in "${PUBLIC_ENDPOINTS[@]}"; do
   code=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" "${API_BASE}${ep}" 2>/dev/null || echo "000")
   if [[ "${code}" == "200" ]]; then
