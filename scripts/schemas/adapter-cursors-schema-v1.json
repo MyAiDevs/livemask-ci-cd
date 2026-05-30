@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MyAiDevs/livemask-ci-cd/scripts/schemas/adapter-cursors-schema-v1.json",
+  "title": "LiveMask Event Adapter Cursors",
+  "description": "Persistent cursor state for event poller adapters. Each poller stores its last-seen position to enable incremental polling.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "updated_at", "pollers"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of the last cursor update"
+    },
+    "pollers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "poll-fixed-control-issues": {
+          "$ref": "#/$defs/issue_poller_cursor"
+        },
+        "poll-ci-runs": {
+          "$ref": "#/$defs/ci_poller_cursor"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "issue_poller_cursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["last_run_ts", "cursors"],
+      "properties": {
+        "last_run_ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "last_event_id": {
+          "type": "string"
+        },
+        "error_state": {
+          "type": "string",
+          "description": "If set, this poller is in error/snapshot mode and should not produce incremental events"
+        },
+        "cursors": {
+          "type": "object",
+          "description": "Keyed by 'owner/repo#issue_number'. Value is the last seen comment databaseId.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["last_comment_id"],
+            "properties": {
+              "last_comment_id": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "last_checked_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "total_comments_seen": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "ci_poller_cursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["last_run_ts", "cursors"],
+      "properties": {
+        "last_run_ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "last_event_id": {
+          "type": "string"
+        },
+        "error_state": {
+          "type": "string"
+        },
+        "cursors": {
+          "type": "object",
+          "description": "Keyed by 'MyAiDevs/repo-name'. Value is the last seen run state.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["last_run_id", "last_head_sha"],
+            "properties": {
+              "last_run_id": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "last_head_sha": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{7,40}$"
+              },
+              "last_status": {
+                "type": "string"
+              },
+              "last_conclusion": {
+                "type": ["string", "null"]
+              },
+              "last_checked_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "total_runs_seen": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

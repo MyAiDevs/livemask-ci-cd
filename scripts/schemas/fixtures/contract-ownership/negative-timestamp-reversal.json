@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "task_id": "TASK-BACKEND-GEOIP-001",
+  "target_repo": "livemask-backend",
+  "state": "under_codex_review",
+  "review_round": 1,
+  "next_required_actor": "codex",
+  "links": {
+    "task_doc": "docs/development/tasks/TASK-BACKEND-GEOIP-001.md"
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "claude": {
+        "submitted_at": "2026-05-30T20:00:00Z",
+        "summary": "Added GeoIP credential RBAC middleware",
+        "commit": "abc1234def5678",
+        "files_changed": [],
+        "validation": [],
+        "known_issues": []
+      },
+      "codex": {
+        "reviewed_at": "2026-05-30T19:00:00Z",
+        "verdict": "approved",
+        "findings": []
+      }
+    }
+  ]
+}

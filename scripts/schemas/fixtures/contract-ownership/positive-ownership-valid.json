@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "task_id": "TASK-BACKEND-GEOIP-001",
+  "target_repo": "livemask-backend",
+  "state": "under_codex_review",
+  "review_round": 1,
+  "next_required_actor": "codex",
+  "links": {
+    "task_doc": "docs/development/tasks/TASK-BACKEND-GEOIP-001.md",
+    "issues": ["https://github.com/MyAiDevs/livemask-backend/issues/42"]
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "claude": {
+        "submitted_at": "2026-05-30T20:00:00Z",
+        "summary": "Added GeoIP credential RBAC middleware",
+        "commit": "abc1234def5678",
+        "files_changed": ["internal/geoip/middleware.go"],
+        "validation": [{"cmd": "go test ./...", "result": "pass"}],
+        "known_issues": []
+      },
+      "codex": {
+        "reviewed_at": "2026-05-30T20:30:00Z",
+        "verdict": "changes_requested",
+        "findings": [
+          {
+            "id": "F1",
+            "file": "internal/geoip/middleware.go",
+            "line": 42,
+            "severity": "must_fix",
+            "issue": "Missing nil check for credential",
+            "required_action": "Add nil check before RBAC validation"
+          }
+        ]
+      }
+    }
+  ]
+}
