@@ -1,0 +1,18 @@
+{
+  "event_id": "EVT-C3D4E5F6-20260530220000",
+  "event_type": "state.snapshot",
+  "ts": "2026-05-30T22:00:00Z",
+  "source": "poll-fixed-control-issues",
+  "repo": "MyAiDevs/livemask-docs",
+  "priority": "low",
+  "snapshot": {
+    "reason": "Cursor file corrupted: invalid JSON at line 12. Entering snapshot mode to prevent fake incremental events.",
+    "affected_poller": "poll-fixed-control-issues",
+    "cursor_dump": {
+      "poll-fixed-control-issues": {
+        "last_run_ts": "2026-05-30T20:00:00Z",
+        "cursors": {}
+      }
+    }
+  }
+}

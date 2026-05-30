@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MyAiDevs/livemask-docs/docs/development/schemas/event-schema-v1.json",
+  "title": "LiveMask Event Cache Event",
+  "description": "Schema for a single event line in .claude/event-cache/event-cache.jsonl. Each line is an independent JSON object. This cache is a local accelerator only — never a source of truth.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event_type", "ts", "source"],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "pattern": "^EVT-[A-Z0-9]{8}-[0-9]{14}$",
+      "description": "Unique event identifier. Format: EVT-XXXXXXXX-YYYYMMDDHHMMSS"
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "comment.created",
+        "ci.run.completed",
+        "ci.run.in_progress",
+        "ci.run.queued",
+        "ci.run.failure",
+        "state.snapshot"
+      ]
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp when the event was produced by the poller"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "poll-fixed-control-issues",
+        "poll-ci-runs",
+        "poll-sap-state",
+        "poll-planner-queue"
+      ],
+      "description": "Name of the poller that produced this event"
+    },
+    "repo": {
+      "type": "string",
+      "description": "GitHub repository in MyAiDevs namespace affected by this event"
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["high", "normal", "low"],
+      "default": "normal"
+    },
+
+    "comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "issue_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "comment_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "comment_body": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "First 500 chars of the comment body"
+        },
+        "body_length": {
+          "type": "integer",
+          "description": "Full comment body length before truncation"
+        },
+        "author": {
+          "type": "string"
+        },
+        "cursor_key": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_.-]+/[0-9]+/[0-9]+$",
+          "description": "Dedup key: repo/issue_number/comment_id"
+        },
+        "keywords_matched": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "PERMANENT_CHANNEL",
+              "RULE_UPDATE",
+              "ACTION_NEEDED",
+              "ENFORCE",
+              "PROCESS_DEFECT",
+              "RUNTIME_STALE",
+              "LEDGER_STALE",
+              "WAIT_TASK",
+              "WAIT_CI",
+              "accepted-skip"
+            ]
+          },
+          "description": "Keywords from supervisor rules Section 1A found in this comment"
+        }
+      }
+    },
+
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "head_sha": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{7,40}$"
+        },
+        "workflow_name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["queued", "in_progress", "waiting", "pending", "completed"]
+        },
+        "conclusion": {
+          "type": ["string", "null"],
+          "enum": ["success", "failure", "cancelled", "timed_out", "skipped", null]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "Why snapshot mode was entered (e.g., corrupt cursor, first run)"
+        },
+        "affected_poller": {
+          "type": "string"
+        },
+        "cursor_dump": {
+          "type": "object",
+          "description": "Full cursor state at time of snapshot"
+        }
+      }
+    }
+  },
+
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "comment.created"
+          }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "required": ["comment"],
+        "properties": {
+          "comment": {
+            "required": ["issue_number", "comment_id", "author", "cursor_key"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "enum": [
+              "ci.run.completed",
+              "ci.run.in_progress",
+              "ci.run.queued",
+              "ci.run.failure"
+            ]
+          }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "required": ["ci"],
+        "properties": {
+          "ci": {
+            "required": ["run_id", "head_sha", "workflow_name", "status", "url"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "state.snapshot"
+          }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "required": ["snapshot"],
+        "properties": {
+          "snapshot": {
+            "required": ["reason", "affected_poller"]
+          }
+        }
+      }
+    }
+  ]
+}
