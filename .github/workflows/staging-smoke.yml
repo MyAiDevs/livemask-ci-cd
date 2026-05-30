@@ -114,7 +114,9 @@ jobs:
       - name: Prepare staging build context
         run: bash scripts/prepare-staging-build-context.sh --ci
       - name: Start staging
-        run: docker compose -f infra/docker-compose.staging.yml up -d --build
+        run: |
+          docker compose -f infra/docker-compose.staging.yml down --remove-orphans -v 2>/dev/null || true
+          docker compose -f infra/docker-compose.staging.yml up -d --build
       - name: Collect runtime status
         continue-on-error: true
         run: |
