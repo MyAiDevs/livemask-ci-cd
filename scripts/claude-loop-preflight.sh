@@ -69,7 +69,7 @@ cd "${CI_CD_DIR}"
 
 # ── Channel 4: GitHub issues ─────────────────────────────────────────────────
 echo "--- Channel 4: GitHub Issues ---"
-for ISSUE_REPO in "MyAiDevs/livemask-docs:62" "MyAiDevs/livemask-ci-cd:14"; do
+for ISSUE_REPO in "MyAiDevs/livemask-docs:68" "MyAiDevs/livemask-ci-cd:14"; do
   REPO="${ISSUE_REPO%%:*}"
   NUM="${ISSUE_REPO##*:}"
   ISSUE_OUT=$(gh issue view "${NUM}" --repo "${REPO}" --json state --jq '.state' 2>&1) || ISSUE_RC=$?
@@ -87,11 +87,34 @@ for ISSUE_REPO in "MyAiDevs/livemask-docs:62" "MyAiDevs/livemask-ci-cd:14"; do
       block "GitHub: ${REPO}#${NUM} state=${ISSUE_STATE} (gh exit=${ISSUE_RC}) — not CLOSED, blocking idle"
       ;;
   esac
+
+  # NEW: Check recent comments for actionable keywords (per supervisor rules Section 1A)
+  COMMENT_INFO=$(gh issue view "${NUM}" --repo "${REPO}" --json comments --jq '
+    [.comments[-3:][] | {id: .databaseId, author: .author.login, created: .createdAt, prefix: .body[0:120]}]
+  ' 2>/dev/null || echo '[]')
+  COMMENT_COUNT=$(echo "${COMMENT_INFO}" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+  echo "  ${REPO}#${NUM}: ${COMMENT_COUNT} recent comment(s)"
+
+  HAS_ACTIONABLE=$(echo "${COMMENT_INFO}" | python3 -c "
+import json,sys
+comments = json.load(sys.stdin)
+keywords = ['PERMANENT_CHANNEL','RULE_UPDATE','ACTION_NEEDED','ENFORCE','PROCESS_DEFECT','RUNTIME_STALE','LEDGER_STALE','WAIT_TASK','WAIT_CI','accepted-skip']
+for c in comments:
+    body = c.get('prefix','')
+    for kw in keywords:
+        if kw in body:
+            print(kw)
+            sys.exit(0)
+print('')
+" 2>/dev/null || true)
+  if [[ -n "${HAS_ACTIONABLE}" ]]; then
+    work "GitHub: ${REPO}#${NUM} latest comment contains ${HAS_ACTIONABLE}"
+  fi
 done
 
 # ── Channel 5: CI/CD status ────────────────────────────────────────────────
 echo "--- Channel 5: CI/CD ---"
-for CI_REPO in "MyAiDevs/livemask-docs" "MyAiDevs/livemask-ci-cd"; do
+for CI_REPO in "MyAiDevs/livemask-docs" "MyAiDevs/livemask-ci-cd" "MyAiDevs/livemask-backend" "MyAiDevs/livemask-admin"; do
   CI_RUNS=$(gh run list --repo "${CI_REPO}" --branch dev --limit 3 --json status,conclusion,workflowName,headSha,url 2>&1) || CI_RC=$?
   CI_RC=${CI_RC:-0}
   if [[ "${CI_RC}" -ne 0 ]]; then
@@ -125,6 +148,39 @@ for r in runs:
     echo "  ${CI_REPO}: no failures (${CI_RUNS:+runs found})"
   fi
 done
+
+# ── Channel 6: Event Cache Liveness ──────────────────────────────────────────
+echo "--- Channel 6: Event Cache ---"
+EVENT_CACHE="${HOME}/.claude/event-cache/event-cache.jsonl"
+CURSOR_STATE="${HOME}/.claude/event-cache/adapter-cursors.json"
+if [[ -f "${EVENT_CACHE}" ]]; then
+  CACHE_SIZE=$(wc -l < "${EVENT_CACHE}" 2>/dev/null | tr -d ' ' || echo "0")
+  LAST_LINE=$(tail -1 "${EVENT_CACHE}" 2>/dev/null || echo "")
+  if [[ -n "${LAST_LINE}" ]]; then
+    LAST_TS=$(echo "${LAST_LINE}" | python3 -c "import json,sys; print(json.loads(sys.stdin.read()).get('ts','unknown'))" 2>/dev/null || echo "unknown")
+    echo "  Event cache: ${CACHE_SIZE} events, last at ${LAST_TS}"
+  else
+    echo "  Event cache: empty (${CACHE_SIZE} lines)"
+  fi
+  # Check staleness (>60 min since last event)
+  NOW_EPOCH=$(date -u +%s)
+  EVENT_EPOCH=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "${LAST_TS:-1970-01-01T00:00:00Z}" +%s 2>/dev/null || echo "0")
+  AGE_MIN=$(( (NOW_EPOCH - EVENT_EPOCH) / 60 ))
+  if [[ "${LAST_TS:-}" != "unknown" && -n "${LAST_TS:-}" ]]; then
+    if [[ "${AGE_MIN}" -gt 60 ]]; then
+      REASONS+=("ADVISORY: event cache is ${AGE_MIN} min stale — pollers may be down, but this is NOT a blocker (cache is accelerator only)")
+    fi
+  fi
+  idle_ok "Event cache: present"
+else
+  echo "  Event cache: not found (first run or pollers not yet executed)"
+  idle_ok "Event cache: absent (expected on fresh workspace)"
+fi
+if [[ -f "${CURSOR_STATE}" ]]; then
+  echo "  Cursor state: present"
+else
+  echo "  Cursor state: not yet initialized"
+fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""
