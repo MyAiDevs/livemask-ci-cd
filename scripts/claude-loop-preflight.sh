@@ -16,6 +16,8 @@ REASONS=()
 block() { BLOCKED=1; REASONS+=("BLOCKED: $*"); }
 work() { WORK=1; REASONS+=("WORK_AVAILABLE: $*"); }
 idle_ok() { REASONS+=("IDLE_OK: $*"); }
+review_req() { WORK=1; REASONS+=("REVIEW_REQUIRED: $*"); }
+reconcile_req() { WORK=1; REASONS+=("RECONCILE_REQUIRED: $*"); }
 
 echo "=== Claude Loop Multi-Channel Preflight ==="
 
@@ -48,6 +50,137 @@ elif [[ "${CANDIDATE_COUNT}" -gt 0 ]]; then
   done
 else
   idle_ok "Planner: no candidates"
+fi
+
+# ── Channel 2b: Review Contracts ────────────────────────────────────────────
+echo "--- Channel 2b: Review Contracts ---"
+REVIEW_DIR="${DOCS_DIR}/docs/development/review-contracts"
+REVIEW_ACTION_COUNT=0
+if [[ -d "${REVIEW_DIR}" ]]; then
+  for rf in "${REVIEW_DIR}"/*.json; do
+    [[ ! -f "${rf}" ]] && continue
+    [[ "$(basename "${rf}")" == ".gitkeep" ]] && continue
+
+    REVIEW_INFO=$(python3 -c "
+import json
+d = json.load(open('${rf}'))
+state = d.get('state','?')
+actor = d.get('next_required_actor','?')
+tid = d.get('task_id','?')
+# Find codex verdict in latest round
+rounds = d.get('rounds',[])
+verdict = ''
+if rounds:
+    latest = rounds[-1]
+    codex = latest.get('codex',{})
+    verdict = codex.get('verdict','')
+print(f'{state}|{actor}|{tid}|{verdict}')
+" 2>/dev/null || echo "PARSE_ERROR")
+
+    if [[ "${REVIEW_INFO}" == "PARSE_ERROR" ]]; then
+      continue
+    fi
+
+    r_state="${REVIEW_INFO%%|*}"
+    REVIEW_INFO="${REVIEW_INFO#*|}"
+    r_actor="${REVIEW_INFO%%|*}"
+    REVIEW_INFO="${REVIEW_INFO#*|}"
+    r_task="${REVIEW_INFO%%|*}"
+    r_verdict="${REVIEW_INFO##*|}"
+
+    case "${r_state}" in
+      changes_requested)
+        echo "  ${r_task}: changes_requested (next=${r_actor})"
+        review_req "contract ${r_task} state=changes_requested next_actor=${r_actor} — Claude must revise and re-submit"
+        REVIEW_ACTION_COUNT=$((REVIEW_ACTION_COUNT + 1))
+        ;;
+      under_codex_review)
+        echo "  ${r_task}: under_codex_review (next=${r_actor})"
+        REASONS+=("WAIT_REVIEW: contract ${r_task} is under Codex review — do not accept new tasks for this repo until verdict")
+        ;;
+      approved)
+        echo "  ${r_task}: approved (next=${r_actor})"
+        if [[ "${r_actor}" == "claude" ]]; then
+          review_req "contract ${r_task} state=approved next_actor=claude — Claude should proceed to merge/ledger reconciliation"
+          REVIEW_ACTION_COUNT=$((REVIEW_ACTION_COUNT + 1))
+        fi
+        ;;
+      blocked)
+        echo "  ${r_task}: blocked (next=${r_actor})"
+        block "contract ${r_task} state=blocked — must not proceed until unblocked"
+        ;;
+      closed|merged|ledger_reconciled)
+        echo "  ${r_task}: ${r_state} — terminal, no action"
+        ;;
+      *)
+        echo "  ${r_task}: ${r_state} (next=${r_actor})"
+        ;;
+    esac
+  done
+fi
+if [[ "${REVIEW_ACTION_COUNT}" -eq 0 ]]; then
+  echo "  Review contracts: no contracts requiring Claude action"
+  idle_ok "Review contracts: no Claude action required"
+fi
+
+# ── Channel 2c: Ledger Staleness Check ──────────────────────────────────────
+echo "--- Channel 2c: Ledger Staleness ---"
+LEDGER_STALE=$(python3 -c "
+import json
+from pathlib import Path
+
+ledger_path = Path('${DOCS_DIR}/docs/development/task-state-ledger.json')
+if not ledger_path.exists():
+    print('LEDGER_MISSING')
+    exit(0)
+
+ledger = json.loads(ledger_path.read_text())
+stale = []
+non_terminal = {'ready', 'in_progress', 'implemented', 'verified', 'partial', 'blocked', 'evidence_missing'}
+
+for module in ledger.get('modules', []):
+    module_id = module.get('module_id', '')
+    for task in module.get('tasks', []):
+        tid = task.get('task_id', '')
+        status = task.get('status', '')
+        if status not in non_terminal:
+            continue
+        # Tasks with no issue reference are stale by definition
+        issue = task.get('issue', '')
+        if not issue:
+            stale.append(f'{tid}|{status}|no_issue')
+            continue
+        # Tasks with no validation evidence in non-terminal state
+        validation = task.get('validation', '')
+        if not validation or validation.strip() == '':
+            stale.append(f'{tid}|{status}|no_validation')
+            continue
+
+if stale:
+    for s in stale[:8]:
+        print(s)
+else:
+    print('CLEAN')
+" 2>/dev/null || echo "PARSE_ERROR")
+
+if echo "${LEDGER_STALE}" | grep -qE "no_issue|no_validation"; then
+  echo "  Ledger staleness found:"
+  while IFS='|' read -r tid status reason; do
+    [[ -z "${tid}" ]] && continue
+    echo "    ${tid} (${status}, ${reason})"
+    reconcile_req "ledger entry ${tid} status=${status} reason=${reason} — needs task doc or issue link update"
+  done <<< "${LEDGER_STALE}"
+elif [[ "${LEDGER_STALE}" == "CLEAN" ]]; then
+  echo "  Ledger: no obvious staleness detected"
+  idle_ok "Ledger: no staleness"
+elif [[ "${LEDGER_STALE}" == "LEDGER_MISSING" ]]; then
+  echo "  Ledger: file not found"
+  block "Ledger: task-state-ledger.json missing — cannot verify task state"
+elif [[ "${LEDGER_STALE}" == "PARSE_ERROR" ]]; then
+  echo "  Ledger: staleness check failed (parse error)"
+else
+  echo "  Ledger: staleness check returned unexpected output"
+  echo "${LEDGER_STALE}" | head -3
 fi
 
 # ── Channel 3: Git status in livemask-docs ───────────────────────────────────
@@ -199,6 +332,21 @@ else
 fi
 echo "============================================"
 printf '%s\n' "${REASONS[@]}"
+
+# Count specific signal types for startup script consumption
+# grep -c outputs "0" on no match (with exit 1), so suppress exit code and strip whitespace
+REVIEW_COUNT=$( { printf '%s\n' "${REASONS[@]}" | grep -c "REVIEW_REQUIRED:" 2>/dev/null; } || true )
+REVIEW_COUNT=$(echo "${REVIEW_COUNT}" | tr -d '[:space:]')
+[[ -z "${REVIEW_COUNT}" ]] && REVIEW_COUNT=0
+RECONCILE_COUNT=$( { printf '%s\n' "${REASONS[@]}" | grep -c "RECONCILE_REQUIRED:" 2>/dev/null; } || true )
+RECONCILE_COUNT=$(echo "${RECONCILE_COUNT}" | tr -d '[:space:]')
+[[ -z "${RECONCILE_COUNT}" ]] && RECONCILE_COUNT=0
+if [[ "${REVIEW_COUNT}" -gt 0 ]]; then
+  echo "SIGNAL: REVIEW_REQUIRED=${REVIEW_COUNT} contract(s) need Claude action"
+fi
+if [[ "${RECONCILE_COUNT}" -gt 0 ]]; then
+  echo "SIGNAL: RECONCILE_REQUIRED=${RECONCILE_COUNT} ledger/task-doc entries need reconciliation"
+fi
 
 [[ "${BLOCKED}" -eq 1 ]] && exit 2
 [[ "${WORK}" -eq 1 ]] && exit 1

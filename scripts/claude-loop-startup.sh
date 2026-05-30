@@ -153,13 +153,40 @@ run_recovery() {
 run_preflight() {
   header "Step 2: Preflight"
   local preflight_rc=0
+  local preflight_output
 
-  bash "${CI_CD_DIR}/scripts/claude-loop-preflight.sh" || preflight_rc=$?
+  preflight_output=$(bash "${CI_CD_DIR}/scripts/claude-loop-preflight.sh" 2>&1) || preflight_rc=$?
+
+  # Extract signal counts for routing (safe grep — see preflight.sh SIGNAL lines)
+  local review_count=0 reconcile_count=0
+  if echo "${preflight_output}" | grep -q "REVIEW_REQUIRED:" 2>/dev/null; then
+    review_count=$(echo "${preflight_output}" | grep -c "REVIEW_REQUIRED:" 2>/dev/null || true)
+    review_count=$(echo "${review_count}" | tr -d '[:space:]')
+  fi
+  if echo "${preflight_output}" | grep -q "RECONCILE_REQUIRED:" 2>/dev/null; then
+    reconcile_count=$(echo "${preflight_output}" | grep -c "RECONCILE_REQUIRED:" 2>/dev/null || true)
+    reconcile_count=$(echo "${reconcile_count}" | tr -d '[:space:]')
+  fi
+
+  # Print preflight output
+  echo "${preflight_output}"
+
+  # Save signal counts for main flow consumption
+  export PREFLIGHT_REVIEW_COUNT="${review_count}"
+  export PREFLIGHT_RECONCILE_COUNT="${reconcile_count}"
 
   echo ""
   case "${preflight_rc}" in
-    0) ok "preflight: IDLE — no work, entering monitor mode";;
-    1) echo -e "${BOLD}${YELLOW}>>> preflight: WORK_AVAILABLE — proceed to task context${RESET}";;
+    0)
+      # IDLE: only if no REVIEW_REQUIRED or RECONCILE_REQUIRED signals (defense in depth)
+      if [[ "${review_count}" -gt 0 ]] || [[ "${reconcile_count}" -gt 0 ]]; then
+        echo -e "${BOLD}${YELLOW}>>> preflight: WORK_AVAILABLE (REVIEW_REQUIRED=${review_count}, RECONCILE_REQUIRED=${reconcile_count})${RESET}"
+        preflight_rc=1
+      else
+        ok "preflight: IDLE — no work, no blockers, no review actions"
+      fi
+      ;;
+    1) echo -e "${BOLD}${YELLOW}>>> preflight: WORK_AVAILABLE — must act before declaring idle${RESET}";;
     2) echo -e "${BOLD}${RED}>>> preflight: BLOCKED — resolve blockers first${RESET}";;
     *) warn "preflight: unexpected exit code ${preflight_rc}";;
   esac
@@ -338,7 +365,14 @@ for line in sys.stdin:
 }
 
 # ── Step 6: Decision summary ─────────────────────────────────────────────────
+# Accepts: $1 = preflight exit code (0=IDLE, 1=WORK_AVAILABLE, 2=BLOCKED)
+#          $2 = review signal count (REVIEW_REQUIRED)
+#          $3 = reconcile signal count (RECONCILE_REQUIRED)
 decision_summary() {
+  local pf_rc="${1:-0}"
+  local review_ct="${2:-0}"
+  local reconcile_ct="${3:-0}"
+
   header "Step 6: Decision"
 
   echo ""
@@ -349,28 +383,82 @@ decision_summary() {
   echo "  agent phase:   ${AGENT_PHASE}"
   echo "  current task:  ${CURRENT_TASK}"
   echo "  task phase:    ${TASK_PHASE}"
+  echo "  preflight:     exit=${pf_rc} review=${review_ct} reconcile=${reconcile_ct}"
 
+  # ── RECOVERY PATH: non-idle agent phase ────────────────────────────────
   if [[ "${AGENT_PHASE}" != "idle" && "${AGENT_PHASE}" != "idle_monitor" ]]; then
     echo ""
     echo -e "  ${BOLD}${YELLOW}>>> RECOVERING: Continue ${CURRENT_TASK} from phase ${TASK_PHASE}${RESET}"
     echo "  Last action: ${LAST_ACTION:-none}"
     echo ""
     echo "  NEXT: bash ${ADAPTER_LIB} task-context ${CURRENT_TASK}"
-  elif [[ "${AGENT_PHASE}" == "idle" ]]; then
-    echo ""
-    echo -e "  ${BOLD}${GREEN}>>> READY: Accept top dispatchable task and begin implementation${RESET}"
-    echo ""
-    echo "  BEFORE implementing:"
-    echo "  1. Read ALL required_first_reads from the context bundle"
-    echo "  2. Read the relevant domain docs for the target repo"
-    echo "  3. Read the linked GitHub issue (body + comments)"
-    echo "  4. Read the task doc under docs/development/tasks/"
-    echo "  5. Run the recommended searches for existing references"
-    echo "  6. Update agent-state.json: phase=implementing"
-  else
-    echo ""
-    echo -e "  ${BOLD}${GREEN}>>> MONITORING: Idle until event or /loop wake${RESET}"
+    return 0
   fi
+
+  # ── BLOCKED: preflight exit 2 ──────────────────────────────────────────
+  if [[ "${pf_rc}" -eq 2 ]]; then
+    echo ""
+    echo -e "  ${BOLD}${RED}>>> BLOCKED: Must resolve blockers before any other action${RESET}"
+    echo ""
+    echo "  REQUIRED:"
+    echo "  1. Address each BLOCKED: reason in the preflight output above"
+    echo "  2. For CI failures: diagnose, fix, re-push, wait for CI pass"
+    echo "  3. For SAP blockers: ack, resolve, archive per supervisor rules"
+    echo "  4. Re-run preflight after each resolution"
+    echo "  5. DO NOT accept new tasks until preflight returns IDLE or WORK_AVAILABLE"
+    return 0
+  fi
+
+  # ── REVIEW_REQUIRED / RECONCILE_REQUIRED take priority over new tasks ──
+  if [[ "${review_ct}" -gt 0 ]]; then
+    echo ""
+    echo -e "  ${BOLD}${YELLOW}>>> REVIEW_REQUIRED: ${review_ct} review contract(s) need Claude action${RESET}"
+    echo ""
+    echo "  REQUIRED before accepting new tasks:"
+    echo "  1. Read the review contract(s) under docs/development/review-contracts/"
+    echo "  2. If state=changes_requested: read Codex findings, revise, re-submit"
+    echo "  3. If state=approved: proceed to merge + ledger reconciliation"
+    echo "  4. Update agent-state.json: phase=revising or phase=merging"
+    echo "  5. DO NOT skip to new task dispatch while review contracts are pending"
+  fi
+
+  if [[ "${reconcile_ct}" -gt 0 ]]; then
+    echo ""
+    echo -e "  ${BOLD}${YELLOW}>>> RECONCILE_REQUIRED: ${reconcile_ct} ledger/task-doc entr(ies) need synchronization${RESET}"
+    echo ""
+    echo "  REQUIRED before declaring clean:"
+    echo "  1. Read the stale ledger entries listed in preflight above"
+    echo "  2. Update task-state-ledger.json and/or task doc on a task/* branch"
+    echo "  3. Run bash scripts/check-docs.sh && git diff --check"
+    echo "  4. Merge through dev-merge-guard.sh"
+    echo "  5. DO NOT report Clean/idle while RECONCILE_REQUIRED signals remain"
+  fi
+
+  # ── WORK_AVAILABLE: must accept work, CANNOT enter monitoring ───────────
+  if [[ "${pf_rc}" -eq 1 ]]; then
+    if [[ "${review_ct}" -eq 0 && "${reconcile_ct}" -eq 0 ]]; then
+      echo ""
+      echo -e "  ${BOLD}${GREEN}>>> WORK_AVAILABLE: Must accept task from planner queue${RESET}"
+      echo ""
+      echo "  HARD RULE: preflight exit=1 means work exists. Declaring idle is a PROCESS_DEFECT."
+      echo ""
+      echo "  BEFORE implementing:"
+      echo "  1. Read ALL required_first_reads from the context bundle above"
+      echo "  2. Read the relevant domain docs for the target repo"
+      echo "  3. Read the linked GitHub issue (body + comments)"
+      echo "  4. Read the task doc under docs/development/tasks/"
+      echo "  5. Run the recommended searches for existing references"
+      echo "  6. Update agent-state.json: phase=implementing"
+    fi
+    return 0
+  fi
+
+  # ── IDLE: only reachable when pf_rc=0 AND no review/reconcile signals ──
+  echo ""
+  echo -e "  ${BOLD}${GREEN}>>> IDLE: No work, no blockers, no review actions. Entering monitor mode.${RESET}"
+  echo ""
+  echo "  Wake triggers: new SAP, planner candidate, review contract update,"
+  echo "                 #14/#68 actionable comment, CI failure, manual /loop"
   echo ""
 }
 
@@ -379,12 +467,13 @@ case "${MODE}" in
   --recovery)
     read_agent_state
     run_recovery
+    decision_summary 0 0 0
     ;;
   --quick)
     read_agent_state
     if [[ "${AGENT_PHASE}" != "idle" && "${AGENT_PHASE}" != "idle_monitor" ]]; then
       run_recovery
-      decision_summary
+      decision_summary 0 0 0
     else
       echo "quick mode: agent is idle, nothing to recover"
     fi
@@ -404,9 +493,14 @@ case "${MODE}" in
     preflight_rc=0
     run_preflight || preflight_rc=$?
 
+    # Read signal counts from exported vars (set by run_preflight)
+    review_signal_count="${PREFLIGHT_REVIEW_COUNT:-0}"
+    reconcile_signal_count="${PREFLIGHT_RECONCILE_COUNT:-0}"
+
     if [[ "${preflight_rc}" -eq 2 ]]; then
       echo ""
       echo -e "${BOLD}${RED}BLOCKED — resolve the blockers listed above before accepting tasks.${RESET}"
+      decision_summary 2 "${review_signal_count}" "${reconcile_signal_count}"
       exit 2
     fi
 
@@ -417,6 +511,7 @@ case "${MODE}" in
     check_fixed_channels || true
     check_event_cache || true
 
-    decision_summary
+    # HARD GATE: if preflight_rc != 0, decision_summary enforces action (never monitoring)
+    decision_summary "${preflight_rc}" "${review_signal_count}" "${reconcile_signal_count}"
     ;;
 esac
