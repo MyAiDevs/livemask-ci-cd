@@ -74,6 +74,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
     networks:
       - livemask-staging
 
@@ -140,7 +146,7 @@ services:
       - livemask-staging-nodeagent:/var/lib/livemask-nodeagent
     depends_on:
       backend:
-        condition: service_started
+        condition: service_healthy
     networks:
       - livemask-staging
 
