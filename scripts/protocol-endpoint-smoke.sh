@@ -171,13 +171,36 @@ for item in items:
 print("")
 '
   local node_id
-  node_id=$(curl -sS --max-time 5 "${API_BASE}/admin/api/v1/nodes?search=${SMOKE_NODE_NAME}&page=1&page_size=50" \
-    -H "Authorization: Bearer ${ADMIN_TOKEN}" 2>/dev/null | SMOKE_NODE_NAME="${SMOKE_NODE_NAME}" python3 -c "${_pick_node_py}" 2>/dev/null || echo "")
-  if [[ -z "${node_id}" ]]; then
-    node_id=$(curl -sS --max-time 5 "${API_BASE}/admin/api/v1/nodes?page=1&page_size=200" \
+  local max_attempts=10
+  local attempt=0
+  local wait_sec=3
+  while [[ "${attempt}" -lt "${max_attempts}" ]]; do
+    node_id=$(curl -sS --max-time 5 "${API_BASE}/admin/api/v1/nodes?search=${SMOKE_NODE_NAME}&page=1&page_size=50" \
       -H "Authorization: Bearer ${ADMIN_TOKEN}" 2>/dev/null | SMOKE_NODE_NAME="${SMOKE_NODE_NAME}" python3 -c "${_pick_node_py}" 2>/dev/null || echo "")
-  fi
-  echo "${node_id}"
+    if [[ -z "${node_id}" ]]; then
+      node_id=$(curl -sS --max-time 5 "${API_BASE}/admin/api/v1/nodes?page=1&page_size=200" \
+        -H "Authorization: Bearer ${ADMIN_TOKEN}" 2>/dev/null | SMOKE_NODE_NAME="${SMOKE_NODE_NAME}" python3 -c "${_pick_node_py}" 2>/dev/null || echo "")
+    fi
+    if [[ -n "${node_id}" ]]; then
+      echo "${node_id}"
+      return 0
+    fi
+    # Fallback: direct DB lookup when admin API returns no match.
+    if [[ "${DB_SERVICE_REACHABLE}" == "true" || -n "${DB_CONTAINER_NAME}" ]]; then
+      node_id=$(pg_exec -c "SELECT id FROM nodes WHERE name ILIKE '%${SMOKE_NODE_NAME}%' LIMIT 1" 2>/dev/null | head -1 | tr -d ' \t' || echo "")
+      if [[ -n "${node_id}" ]]; then
+        echo "  [retry] Node '${SMOKE_NODE_NAME}' found via DB fallback: id=${node_id}" >&2
+        echo "${node_id}"
+        return 0
+      fi
+    fi
+    attempt=$((attempt + 1))
+    if [[ "${attempt}" -lt "${max_attempts}" ]]; then
+      echo "  [retry] Node '${SMOKE_NODE_NAME}' not found (attempt ${attempt}/${max_attempts}), waiting ${wait_sec}s for nodeagent registration..." >&2
+      sleep "${wait_sec}"
+    fi
+  done
+  echo ""
 }
 
 pg_exec() {
