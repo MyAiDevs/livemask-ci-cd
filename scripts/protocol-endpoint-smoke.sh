@@ -51,6 +51,8 @@ BACKEND_HTTP_PORT="${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
 JOB_SERVICE_PORT="${LIVEMASK_JOB_SERVICE_PORT:-19191}"
 API_BASE="http://127.0.0.1:${BACKEND_HTTP_PORT}"
 JOB_SERVICE_URL="http://127.0.0.1:${JOB_SERVICE_PORT}"
+NODEAGENT_PORT="${LIVEMASK_NODEAGENT_PORT:-19090}"
+NODEAGENT_API_BASE="http://127.0.0.1:${NODEAGENT_PORT}"
 DB_SERVICE_NAME="${LIVEMASK_DB_SERVICE:-}"
 DB_SERVICE_REACHABLE=false
 DB_CONTAINER_NAME="${LIVEMASK_DB_CONTAINER:-}"
@@ -182,6 +184,21 @@ print("")
         -H "Authorization: Bearer ${ADMIN_TOKEN}" 2>/dev/null | SMOKE_NODE_NAME="${SMOKE_NODE_NAME}" python3 -c "${_pick_node_py}" 2>/dev/null || echo "")
     fi
     if [[ -n "${node_id}" ]]; then
+      echo "${node_id}"
+      return 0
+    fi
+    # Fallback: query the nodeagent's own HTTP API for its registered node_id.
+    node_id=$(curl -sS --max-time 3 "${NODEAGENT_API_BASE}/agent/status" 2>/dev/null | python3 -c "
+import json,sys
+try:
+  d=json.load(sys.stdin)
+  nid=d.get('node_id','') or d.get('NodeID','')
+  print(nid)
+except:
+  print('')
+" 2>/dev/null || echo "")
+    if [[ -n "${node_id}" ]]; then
+      echo "  [retry] Node '${SMOKE_NODE_NAME}' found via nodeagent /agent/status: id=${node_id}" >&2
       echo "${node_id}"
       return 0
     fi
