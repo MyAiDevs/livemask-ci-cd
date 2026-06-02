@@ -386,7 +386,7 @@ PY
   fi
 
   local issue_linked=""
-  issue_linked=$(python3 -c "import json; d=json.load(open('${intelligence_file}')); print('yes' if (d.get('github_issue_candidates') or d.get('ledger_issue_refs')) else '')" 2>/dev/null || echo "")
+  issue_linked=$(python3 -c "import json; d=json.load(open('${intelligence_file}')); print('yes' if d.get('github_issue_candidates') else '')" 2>/dev/null || echo "")
   if [[ -z "${issue_linked}" ]]; then
     local issue_body issue_url
     issue_body="${ROLE_CACHE_DIR}/issue-${tid}.md"
@@ -435,16 +435,27 @@ path.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
 PY
       issue_linked="yes"
     else
-      echo "    (skip auto-create ${tid}: no GitHub issue/comment or ledger issue reference found; see ${intelligence_file})"
+      echo "    (skip auto-create ${tid}: unable to create or resolve a GitHub issue URL; see ${intelligence_file})"
       record_finding "${role}" "warning" "" "${check}" \
-        "auto-create skipped because no GitHub issue/comment linkage was found for ${title}" \
-        "link or create a GitHub issue first, then create a canonical TASK with docs/context and quality gates" \
+        "auto-create skipped because no GitHub issue URL could be created or resolved for ${title}" \
+        "repair GitHub issue creation/auth, then create a canonical TASK with docs/context and quality gates" \
         "${intelligence_file}"
       bash "${ADAPTER_LIB}" memory-add "role-engine-auto-create-skip" "${tid}" "${repo}" \
-        "auto-create skipped because no GitHub issue/comment or ledger issue reference existed for ${title}" \
+        "auto-create skipped because no GitHub issue URL could be created or resolved for ${title}" \
         "${intelligence_file}" >/dev/null 2>&1 || true
       return 0
     fi
+  fi
+
+  local task_issue_url=""
+  task_issue_url=$(python3 -c "import json; d=json.load(open('${intelligence_file}')); print((d.get('github_issue_candidates') or [{}])[0].get('url',''))" 2>/dev/null || echo "")
+  if [[ -z "${task_issue_url}" ]]; then
+    echo "    (skip auto-create ${tid}: missing GitHub issue URL after issue guard; see ${intelligence_file})"
+    record_finding "${role}" "warning" "" "${check}" \
+      "auto-create skipped because ${tid} still has no GitHub issue URL after issue guard" \
+      "fix role-engine issue discovery/creation before writing TASK-AUTO artifacts" \
+      "${intelligence_file}"
+    return 0
   fi
 
   # Create task doc with ALL required sections per check-docs.sh schema
@@ -585,6 +596,7 @@ for m in ledger.get('modules',[]):
 if not module:
     module = {'module_id': 'auto-tasks', 'overall_status': 'partial', 'owner_repo': '${repo}', 'tasks': [], 'open_gaps': []}
     ledger['modules'].append(module)
+module['overall_status'] = 'partial'
 module['tasks'].append({
     'task_id': '${tid}',
     'repo': '${repo}',
@@ -592,7 +604,7 @@ module['tasks'].append({
     'status': 'ready',
     'priority': '${priority}',
     'task_doc': 'docs/development/tasks/${tid}.md',
-    'issue': (intel.get('github_issue_candidates') or [{}])[0].get('url',''),
+    'issue': '${task_issue_url}',
     'validation': '',
     'dev_merge_commit': '',
     'remote_dev_ref': '',
@@ -662,12 +674,13 @@ pathlib.Path('${dp_file}').write_text(json.dumps(dp, indent=2))
       WARN "auto-create ${tid} failed docs checks; reverting staged artifacts"
       git reset HEAD docs/development/tasks/ docs/development/dispatch-packets/ docs/development/task-state-ledger.json 2>/dev/null || true
       git checkout -- docs/development/tasks/ docs/development/dispatch-packets/ docs/development/task-state-ledger.json 2>/dev/null || true
+      rm -f "${task_doc}" "${dp_file}" 2>/dev/null || true
       git checkout "${saved_br}" 2>/dev/null || true
       git branch -D "${cr_br}" 2>/dev/null || true
       return 0
     fi
     git commit -m "role-engine: auto-create ${tid}" 2>/dev/null
-    git checkout dev 2>/dev/null && git merge "${cr_br}" --no-edit 2>/dev/null && git push origin dev 2>/dev/null
+    git checkout dev 2>/dev/null && git pull --ff-only origin dev 2>/dev/null && git merge "${cr_br}" --no-edit 2>/dev/null && git push origin dev 2>/dev/null && git pull --ff-only origin dev 2>/dev/null
     git checkout "${saved_br}" 2>/dev/null || git checkout dev 2>/dev/null
   fi
   return 0
