@@ -275,12 +275,15 @@ print(f'  [Task Review] Doc: {\"OK\" if doc.exists() else \"MISSING\"}, Review: 
 event_react_pm_ledger_update() {
   local tid="${1:-}"
   echo "  [PM] Ledger update for approved: ${tid}"
+  source "${CI_CD_DIR}/scripts/lib/ledger-intelligence.sh" 2>/dev/null || true
+  ledger_update_task_status "${tid}" "verified" "leader-approved" "event-bus-pm-ledger-update" 2>/dev/null || true
+  # Backward-compat: also update notes field
   python3 -c "
 import json,pathlib; docs=pathlib.Path('${DOCS_DIR}')
 ledger=json.loads((docs/'docs/development/task-state-ledger.json').read_text())
 for m in ledger.get('modules',[]):
     for t in m.get('tasks',[]):
-        if t.get('task_id')=='${tid}': t['status']='verified'; t['notes']=t.get('notes','')+' [leader-approved]'
+        if t.get('task_id')=='${tid}': t['notes']=t.get('notes','')+' [leader-approved]'
 pathlib.Path(str(docs/'docs/development/task-state-ledger.json')).write_text(json.dumps(ledger,indent=2,ensure_ascii=False))
 " 2>/dev/null || true
 }
@@ -288,14 +291,13 @@ pathlib.Path(str(docs/'docs/development/task-state-ledger.json')).write_text(jso
 event_react_pm_cycle_close() {
   local tid="${1:-}"
   echo "  [PM] Cycle close for: ${tid}"
-  python3 -c "
-import json,pathlib; docs=pathlib.Path('${DOCS_DIR}')
-ledger=json.loads((docs/'docs/development/task-state-ledger.json').read_text())
-for m in ledger.get('modules',[]):
-    for t in m.get('tasks',[]):
-        if t.get('task_id')=='${tid}': t['status']='completed'; t['validation']=t.get('validation','')+' [qa-verified: review-gate QA passed]'
-pathlib.Path(str(docs/'docs/development/task-state-ledger.json')).write_text(json.dumps(ledger,indent=2,ensure_ascii=False))
-" 2>/dev/null || true
+  source "${CI_CD_DIR}/scripts/lib/ledger-intelligence.sh" 2>/dev/null || true
+  # Completion gate enforced: gate checks merge commit, review contract, QA evidence
+  if ledger_complete_task "${tid}" "event-bus-pm-cycle-close" 2>/dev/null; then
+    echo "  [PM] Completion gate passed → ${tid} completed"
+  else
+    echo "  [PM] Completion gate BLOCKED → ${tid} moved to evidence_missing"
+  fi
 }
 
 event_react_pm_diagnose_blocker() {

@@ -573,7 +573,18 @@ run_recovery() {
     warn "${orphaned} task branch(es) found — if current_task is null, these need attention"
   fi
 
-  # 1c. Check for dirty worktrees
+  # 1d. Cross-source consistency check: validate ledger ↔ task docs ↔ dispatch packets ↔ review contracts ↔ GitHub issues
+  info "running cross-source consistency check..."
+  source "${CI_CD_DIR}/scripts/lib/ledger-intelligence.sh" 2>/dev/null || true
+  local consistency_out; consistency_out=$(verify_ledger_consistency "" 2>/dev/null)
+  local mismatch_count; mismatch_count=$(echo "${consistency_out}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('mismatches',0))" 2>/dev/null || echo "0")
+  if [[ "${mismatch_count}" -gt 0 ]]; then
+    warn "${mismatch_count} cross-source mismatches detected — run verify_ledger_consistency for details"
+  else
+    ok "cross-source consistency: clean"
+  fi
+
+  # 1e. Check for dirty worktrees
   info "checking for dirty worktrees..."
   local dirty=0
   cd "${DOCS_DIR}"

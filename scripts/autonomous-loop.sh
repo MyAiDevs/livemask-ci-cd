@@ -50,7 +50,7 @@ mkdir -p /tmp/claude "$(dirname "${LOOP_PID_FILE}")"
 echo $$ > "${LOOP_PID_FILE}"
 
 cleanup_loop() {
-  echo "[$(date -u +%H:%M:%S)] Daemon exiting after ${CYCLE_COUNT} cycles" | tee -a "${LOOP_LOG}"
+  echo "[$(date +%H:%M:%S)] Daemon exiting after ${CYCLE_COUNT} cycles" | tee -a "${LOOP_LOG}"
   rm -f "${LOOP_PID_FILE}"
   executor_stop_heartbeat 2>/dev/null || true
 }
@@ -65,7 +65,7 @@ daemon_watchdog() {
     if [[ ! -f "${pid_file}" ]]; then break; fi
     local recorded_pid; recorded_pid=$(cat "${pid_file}" 2>/dev/null || echo "0")
     if ! kill -0 "${recorded_pid}" 2>/dev/null; then
-      echo "[$(date -u +%H:%M:%S)] WATCHDOG: Daemon PID ${recorded_pid} died — restarting" | tee -a "${LOOP_LOG}"
+      echo "[$(date +%H:%M:%S)] WATCHDOG: Daemon PID ${recorded_pid} died — restarting" | tee -a "${LOOP_LOG}"
       kill "${recorded_pid}" 2>/dev/null || true; sleep 1; nohup bash "${script_path}" &>/tmp/claude/autonomous-loop-stdout.log &
       break  # Old watchdog dies, new daemon starts its own watchdog
     fi
@@ -77,7 +77,51 @@ if [[ -z "${WATCHDOG_ACTIVE:-}" ]]; then
   daemon_watchdog &
 fi
 
-log_cycle() { echo "[$(date -u +%H:%M:%S)] CYCLE#${CYCLE_COUNT} $*" | tee -a "${LOOP_LOG}"; }
+log_cycle() { echo "[$(date +%H:%M:%S)] CYCLE#${CYCLE_COUNT} $*" | tee -a "${LOOP_LOG}"; }
+
+# Reset stale agent state (prevents "Agent busy" infinite loop on restart)
+reset_stale_agent() {
+  python3 -c "
+import json,pathlib,os
+from datetime import datetime,timezone
+p=pathlib.Path('${AGENT_STATE}')
+if not p.exists():
+    d={'phase':'idle','current_task':{}}
+    p.write_text(json.dumps(d,indent=2))
+    raise SystemExit(0)
+d=json.loads(p.read_text())
+phase=d.get('phase','')
+task_id=d.get('current_task',{}).get('task_id','')
+if phase in ('idle','idle_monitor'):
+    raise SystemExit(0)
+# Check heartbeat — if no heartbeat file or >2min old, agent is dead
+hb_file=pathlib.Path('${ROLE_CACHE_DIR}/executor-heartbeat.txt')
+hb_ok=False
+if hb_file.exists():
+    try:
+        hb_age=os.path.getmtime(str(hb_file))
+        hb_ok=(datetime.now().timestamp()-hb_age)<120
+    except: pass
+if not hb_ok:
+    # Also check if task is still active in ledger
+    task_active=False
+    try:
+        lp=pathlib.Path('${DOCS_DIR}/docs/development/task-state-ledger.json')
+        if lp.exists():
+            l=json.loads(lp.read_text())
+            for m in l.get('modules',[]):
+                for t in m.get('tasks',[]):
+                    if t.get('task_id')==task_id and t.get('status') in ('in_progress','implementing'):
+                        task_active=True
+    except: pass
+    if not task_active or not hb_ok:
+        d['phase']='idle'
+        d['current_task']={}
+        d['last_action']='auto-reset: no heartbeat or task not active'
+        p.write_text(json.dumps(d,indent=2))
+        print(f'[RESET] {phase} -> idle (hb_ok={hb_ok}, task_active={task_active})')
+" 2>/dev/null || true
+}
 
 repair_invalid_agent_state() {
   python3 - "${AGENT_STATE}" "${DOCS_DIR}/docs/development/task-state-ledger.json" "${DOCS_DIR}/docs/development/dispatch-packets" <<'PY' 2>/dev/null || true
@@ -127,7 +171,7 @@ post_github_status() {
   # Post to #68 (control channel) for cross-role visibility
   if command -v gh &>/dev/null && executor_gh_available 2>/dev/null; then
     gh issue comment 68 --repo MyAiDevs/livemask-docs \
-      --body "<!-- autonomous-loop --> [$(date -u +%H:%M:%SZ)] ${context}: ${message}" 2>/dev/null || true
+      --body "<!-- autonomous-loop --> [$(date +%H:%M:%SZ)] ${context}: ${message}" 2>/dev/null || true
   fi
 }
 
@@ -153,6 +197,7 @@ while true; do  # Run forever
   sleep "${SLEEP_CYCLE}"
 
   # ── Phase 0: System health ──────────────────────────────────────────
+  reset_stale_agent 2>/dev/null || true
   executor_repair_agent_state 2>/dev/null || true
   repair_invalid_agent_state 2>/dev/null || true
   executor_repair_ledger 2>/dev/null || true
@@ -235,7 +280,8 @@ except:
       # Post to GitHub for visibility
       post_github_status "QUEUE_EMPTY" "No dispatchable tasks. Role engine found no gaps." 2>/dev/null || true
       # SLEEP: No work available, wait before re-checking
-      log_cycle "Sleeping ${SLEEP_IDLE}s — waiting for new tasks to appear"
+      wake_time=$(date -v+${SLEEP_IDLE}S +%H:%M:%S 2>/dev/null || date -d "+${SLEEP_IDLE}sec" +%H:%M:%S 2>/dev/null || echo "?")
+      log_cycle "Sleeping ${SLEEP_IDLE}s — idle (wake at ${wake_time}), next role-engine will scan for gaps"
       sleep "${SLEEP_IDLE}"
       continue
     fi
@@ -323,44 +369,14 @@ pathlib.Path('${DOCS_DIR}/docs/development/task-state-ledger.json').write_text(j
   sync_knowledge "${tid}" 2>/dev/null || true
 
   # ── Post GitHub status ──────────────────────────────────────────────
-  post_github_status "TASK_ACCEPTED" "${tid} in ${repo} (attempt ${attempt_count}/${MAX_ATTEMPTS})" 2>/dev/null || true
+  post_github_status "TASK_DISPATCHED" "${tid} in ${repo} — waiting for Claude to implement" 2>/dev/null || true
 
-  # ── Model implementation instructions ───────────────────────────────
-  log_cycle "ATTEMPTING AUTO-IMPLEMENT: ${tid}"
-  if impl_auto_code "${tid}" 2>/dev/null; then
-    log_cycle "AUTO-IMPL BUILD PASS — running full self-test"
-    source "${CI_CD_DIR}/scripts/lib/local-verify.sh" 2>/dev/null || true
-    local auto_verify; auto_verify=$(verify_repo "${repo}" 2>/dev/null || echo '{"failed":1}')
-    local auto_vfail; auto_vfail=$(echo "${auto_verify}" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d.get('failed',1))" 2>/dev/null || echo "1")
-    if [[ "${auto_vfail}" -gt 0 ]]; then
-      log_cycle "SELF-TEST: verify_repo FAILED (${auto_vfail} failures) — falling through to manual mode"
-    else
-      log_cycle "SELF-TEST: verify_repo PASSED — checking runtime health"
-      local auto_health; auto_health=$(verify_runtime_health "${repo}" "fast" 2>/dev/null || echo '{"failed":1}')
-      local auto_hfail; auto_hfail=$(echo "${auto_health}" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d.get('failed',1) if not d.get('skipped') and d.get('is_service')!=False else '0')" 2>/dev/null || echo "0")
-      if [[ "${auto_hfail}" -gt 0 ]]; then
-        log_cycle "SELF-TEST: runtime health FAILED — falling through to manual mode"
-      else
-        log_cycle "SELF-TEST: all checks PASSED — proceeding to auto-complete"
-        source "${CI_CD_DIR}/scripts/lib/event-bus.sh" 2>/dev/null
-        source "${CI_CD_DIR}/scripts/lib/review-gate.sh" 2>/dev/null
-        event_emit "code_committed" "${tid}" "{}" 2>/dev/null
-        qa_verify "${tid}" 2>/dev/null; leader_approve "${tid}" 2>/dev/null
-        event_emit "task_completed" "${tid}" "{}" 2>/dev/null
-        python3 /tmp/reset_agent.py 2>/dev/null || true
-        log_cycle "AUTO-IMPLEMENT COMPLETE: ${tid}"
-        continue
-      fi
-    fi
-    log_cycle "Auto-implement code generated but self-test blocked — waiting for model to fix"
-  else
-    log_cycle "Auto-implement failed — waiting for model"
-  fi
-  log_cycle "WAITING FOR MODEL: ${tid} in ${repo}"
-  log_cycle "Model must: 1) write code 2) executor_notify commit ${tid} 3) executor_submit_review ${tid}"
+  # ── Dispatch to Claude: task is ready, waiting for skill invocation ──
+  log_cycle "TASK DISPATCHED: ${tid} → ${repo}"
+  log_cycle "Invoke: /task-implement ${tid}   (or Claude will pick up automatically)"
 
-  # ── Monitor loop: wait for model ────────────────────────────────────
-  wait_count=0; liveness_grace=2  # Skip first 2 liveness checks after accept
+  # ── Monitor loop: wait for Claude to implement and complete ─────────
+  wait_count=0; liveness_grace=2
   while [[ "${wait_count}" -lt "${WAIT_MAX}" ]]; do
     task_status=$(python3 -c "import json;l=json.load(open('${DOCS_DIR}/docs/development/task-state-ledger.json'));[print(t['status']) for m in l['modules'] for t in m['tasks'] if t['task_id']=='${tid}']" 2>/dev/null || echo "unknown")
 
@@ -376,7 +392,7 @@ pathlib.Path('${DOCS_DIR}/docs/development/task-state-ledger.json').write_text(j
         post_github_status "TASK_COMPLETED" "${tid} completed successfully" 2>/dev/null || true
         break
         ;;
-      blocked)
+      blocked|unknown)
         log_cycle "Task ${tid} was blocked externally — moving on"
         CONSECUTIVE_BLOCKS=$((CONSECUTIVE_BLOCKS + 1))
         break
@@ -392,11 +408,15 @@ pathlib.Path('${DOCS_DIR}/docs/development/task-state-ledger.json').write_text(j
 
     executor_touch_heartbeat 2>/dev/null || true
     wait_count=$((wait_count + 1))
-      # Remind model every 10 checks (5 min) if still waiting
-      if [[ $((wait_count % 10)) -eq 0 ]]; then
-        log_cycle "REMINDER: ${tid} accepted ${wait_count} checks ago — model should implement and submit"
-      fi
-    # SLEEP: Wait for model to implement, checking periodically
+    # SLEEP: Wait for Claude to implement task
+    elapsed_sec=$((wait_count * WAIT_CHECK))
+    elapsed_min=$((elapsed_sec / 60))
+    wake_time=$(date -v+${WAIT_CHECK}S +%H:%M:%S 2>/dev/null || echo "?")
+    # Remind every 10 checks (5 min) if still waiting
+    if [[ $((wait_count % 10)) -eq 0 ]]; then
+      log_cycle "REMINDER: ${tid} waiting ${elapsed_min}min — invoke /task-implement ${tid}"
+    fi
+    log_cycle "Waiting ${WAIT_CHECK}s for ${tid} (elapsed ${elapsed_min}m, next check at ${wake_time})"
     sleep "${WAIT_CHECK}"
   done
 

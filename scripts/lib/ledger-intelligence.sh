@@ -376,3 +376,50 @@ ledger_full_report() {
   echo ""
   echo "--- END REPORT ---"
 }
+
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════════════════════════════
+# State machine + completion gate wrappers → delegate to Python modules
+# ══════════════════════════════════════════════════════════════════════════════
+_LEDGER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+LEDGER_PY="${_LEDGER_LIB_DIR}/py/ledger.py"
+GATES_PY="${_LEDGER_LIB_DIR}/py/gates.py"
+GAPS_PY="${_LEDGER_LIB_DIR}/py/gaps.py"
+TASK_PY="${_LEDGER_LIB_DIR}/py/task.py"
+
+ledger_update_task_status() {
+  local tid="$1" new_status="$2" evidence="${3:-}" caller="${4:-ledger-intelligence}"
+  python3 "$LEDGER_PY" status "$tid" "$new_status" --evidence "$evidence" --caller "$caller" 2>/dev/null
+  return $?
+}
+
+verify_completion_gate() {
+  local tid="$1"
+  python3 "$GATES_PY" check "$tid" 2>/dev/null
+  return $?
+}
+
+ledger_complete_task() {
+  local tid="$1" caller="${2:-ledger-intelligence}"
+  python3 "$GATES_PY" complete "$tid" --caller "$caller" 2>/dev/null
+  return $?
+}
+
+verify_ledger_consistency() {
+  local tid="${1:-}"
+  python3 "$GATES_PY" consistency "$tid" 2>/dev/null
+  return $?
+}
+
+detect_contract_gaps() {
+  local docs_dir="${1:-$DOCS_DIR}"
+  python3 "$GAPS_PY" detect "$docs_dir" 2>/dev/null
+  return $?
+}
+
+create_auto_task() {
+  # Usage: create_auto_task ROLE CHECK TITLE PRIORITY REPO BODY [ISSUE_URL]
+  python3 "$TASK_PY" create --role "${1:-pm}" --check "${2:-AUTO}" --title "$3" --priority "${4:-P1}" --repo "${5:-livemask-docs}" --body "${6:-}" ${7:+--issue "$7"} 2>/dev/null
+  return $?
+}
