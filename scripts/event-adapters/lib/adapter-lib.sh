@@ -40,9 +40,9 @@ EVENT_CACHE_DIR="${HOME}/.claude/event-cache"
 EVENT_CACHE_FILE="${EVENT_CACHE_DIR}/event-cache.jsonl"
 EVENT_SCHEMA="${CI_CD_DIR}/scripts/schemas/event-schema-v1.json"
 CURSOR_SCHEMA="${CI_CD_DIR}/scripts/schemas/adapter-cursors-schema-v1.json"
-ROLE_CACHE_DIR="${HOME}/.claude/role-cache"
+ROLE_CACHE_DIR="${ROLE_CACHE_DIR:-${HOME}/.claude/role-cache}"
 FINDINGS_FILE="${ROLE_CACHE_DIR}/findings.jsonl"
-PM_LEASE_FILE="${ROLE_CACHE_DIR}/pm-lease.json"
+PM_LEASE_FILE="${PM_LEASE_FILE:-${ROLE_CACHE_DIR}/pm-lease.json}"
 PROJECT_MEMORY_FILE="${ROLE_CACHE_DIR}/project-memory.jsonl"
 DOCS_REPO_DIR="${LIVEMASK_ROOT}/livemask-docs"
 DOCS_DIR="${DOCS_REPO_DIR}/docs"  # Note: autonomous-loop.sh re-exports its own DOCS_DIR after sourcing
@@ -53,6 +53,32 @@ REVIEW_CONTRACTS_DIR="${DOCS_DEVELOPMENT_DIR}/review-contracts"
 DISPATCH_PACKETS_DIR="${DOCS_DEVELOPMENT_DIR}/dispatch-packets"
 SUPERVISOR_ACTIONS_DIR="${DOCS_DEVELOPMENT_DIR}/supervisor-actions"
 AGENT_STATE_FILE="${LIVEMASK_ROOT}/.claude/agent-state.json"
+
+adapter_init_role_cache() {
+  local preferred="${1:-${ROLE_CACHE_DIR}}"
+  ROLE_CACHE_DIR="${preferred}"
+  FINDINGS_FILE="${ROLE_CACHE_DIR}/findings.jsonl"
+  PM_LEASE_FILE="${PM_LEASE_FILE:-${ROLE_CACHE_DIR}/pm-lease.json}"
+  PROJECT_MEMORY_FILE="${ROLE_CACHE_DIR}/project-memory.jsonl"
+
+  if mkdir -p "${ROLE_CACHE_DIR}" 2>/dev/null && ROLE_CACHE_DIR="${ROLE_CACHE_DIR}" python3 - <<'PY' 2>/dev/null; then
+import os
+from pathlib import Path
+probe = Path(os.environ["ROLE_CACHE_DIR"]) / ".write-probe"
+probe.write_text("ok", encoding="utf-8")
+probe.unlink(missing_ok=True)
+PY
+    return 0
+  fi
+
+  ROLE_CACHE_DIR="/tmp/claude/role-cache"
+  FINDINGS_FILE="${ROLE_CACHE_DIR}/findings.jsonl"
+  PM_LEASE_FILE="${ROLE_CACHE_DIR}/pm-lease.json"
+  PROJECT_MEMORY_FILE="${ROLE_CACHE_DIR}/project-memory.jsonl"
+  mkdir -p "${ROLE_CACHE_DIR}" 2>/dev/null || true
+}
+
+adapter_init_role_cache "${ROLE_CACHE_DIR}"
 
 # Project knowledge sources are authoritative search roots for Claude loop,
 # event pollers, and preflight helpers. The local event cache can point to work,
@@ -1056,7 +1082,7 @@ pm_age_min = None
 pm_status = "none"
 if pm:
     pm_age_min = round((now - float(pm.get("started_at_epoch", 0) or 0)) / 60, 1)
-    if pm.get("phase") == "complete":
+    if pm.get("phase") in ("complete", "stale-auto-released", "idle"):
         pm_status = "complete"
     elif pm_age_min <= 15:
         pm_status = "active"
@@ -1068,6 +1094,7 @@ current_task = agent.get("current_task") or {}
 claude_task = current_task.get("task_id")
 claude_phase = agent.get("phase") or current_task.get("phase")
 claude_repo = current_task.get("target_repo") or ""
+ignored_agent_state = None
 
 leases = read_json(task_lease_file, {"leases": []})
 active_leases = [l for l in leases.get("leases", []) if l.get("status") == "active"]
@@ -1080,6 +1107,25 @@ if dispatch_dir.exists():
         if pkt:
             packets.append(pkt)
 task_packets = [p for p in packets if not task_id or p.get("task_id") == task_id]
+
+ledger = read_json(ledger_file, {"modules": []})
+ledger_task_ids = {
+    t.get("task_id")
+    for m in ledger.get("modules", [])
+    for t in m.get("tasks", [])
+    if t.get("task_id")
+}
+dispatch_task_ids = {p.get("task_id") for p in packets if p.get("task_id")}
+if claude_task and claude_phase not in (None, "", "idle", "idle_monitor"):
+    if claude_task not in ledger_task_ids and claude_task not in dispatch_task_ids:
+        ignored_agent_state = {
+            "task_id": claude_task,
+            "phase": claude_phase,
+            "reason": "agent-state task is absent from ledger and dispatch packets",
+        }
+        claude_task = None
+        claude_phase = "idle"
+        claude_repo = ""
 
 status = git_status(docs_repo)
 dirty_docs = any(line and not line.startswith("## ") for line in status.splitlines())
@@ -1152,6 +1198,7 @@ print(json.dumps({
     "progress_tracks": progress_tracks,
     "pm_lease": {"status": pm_status, "agent": pm.get("agent"), "phase": pm.get("phase"), "age_min": pm_age_min},
     "claude_agent": {"phase": claude_phase, "task_id": claude_task, "repo": claude_repo},
+    "ignored_agent_state": ignored_agent_state,
     "active_task_leases": active_task_leases,
     "dispatch_packets": task_packets,
     "docs_status": status,
