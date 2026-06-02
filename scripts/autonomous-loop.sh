@@ -39,6 +39,9 @@ source "${SCRIPT_DIR}/lib/monitor-learn.sh" 2>/dev/null || true
 source "${ADAPTER_LIB}" 2>/dev/null || true
 # CRITICAL: adapter-lib.sh overrides DOCS_DIR to DOCS_REPO_DIR/docs — restore ours
 export DOCS_DIR="${LIVEMASK_ROOT}/livemask-docs"
+ROLE_CACHE_DIR="${ROLE_CACHE_DIR:-/tmp/claude/role-cache}"
+PM_LEASE_FILE="${PM_LEASE_FILE:-${ROLE_CACHE_DIR}/pm-lease.json}"
+LOOP_PID_FILE="${ROLE_CACHE_DIR}/autonomous-loop.pid"
 event_init 2>/dev/null || true
 monitor_init 2>/dev/null || true
 memory_init 2>/dev/null || true
@@ -76,6 +79,48 @@ fi
 
 log_cycle() { echo "[$(date -u +%H:%M:%S)] CYCLE#${CYCLE_COUNT} $*" | tee -a "${LOOP_LOG}"; }
 
+repair_invalid_agent_state() {
+  python3 - "${AGENT_STATE}" "${DOCS_DIR}/docs/development/task-state-ledger.json" "${DOCS_DIR}/docs/development/dispatch-packets" <<'PY' 2>/dev/null || true
+import json
+import pathlib
+import sys
+from datetime import datetime, timezone
+
+agent_path = pathlib.Path(sys.argv[1])
+ledger_path = pathlib.Path(sys.argv[2])
+dispatch_dir = pathlib.Path(sys.argv[3])
+if not agent_path.exists():
+    raise SystemExit
+
+agent = json.loads(agent_path.read_text(encoding="utf-8"))
+task = agent.get("current_task") or {}
+task_id = task.get("task_id")
+phase = agent.get("phase") or task.get("phase")
+if not task_id or phase in (None, "", "idle", "idle_monitor"):
+    raise SystemExit
+
+ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.exists() else {"modules": []}
+ledger_ids = {
+    item.get("task_id")
+    for module in ledger.get("modules", [])
+    for item in module.get("tasks", [])
+    if item.get("task_id")
+}
+dispatch_ids = {
+    path.stem
+    for path in dispatch_dir.glob("TASK-*.json")
+}
+if task_id in ledger_ids or task_id in dispatch_ids:
+    raise SystemExit
+
+agent["phase"] = "idle"
+agent["current_task"] = {}
+agent["last_action"] = f"auto-repaired invalid stale agent-state for {task_id}"
+agent["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+agent_path.write_text(json.dumps(agent, indent=2), encoding="utf-8")
+PY
+}
+
 # ── GitHub status update ──────────────────────────────────────────────────
 post_github_status() {
   local context="$1" message="$2"
@@ -109,6 +154,7 @@ while true; do  # Run forever
 
   # ── Phase 0: System health ──────────────────────────────────────────
   executor_repair_agent_state 2>/dev/null || true
+  repair_invalid_agent_state 2>/dev/null || true
   executor_repair_ledger 2>/dev/null || true
   executor_cleanup_alerts 2>/dev/null || true
   monitor_check_consistency 2>/dev/null >> "${LOOP_LOG}" || true
@@ -150,7 +196,7 @@ while true; do  # Run forever
     # Clear self-audit overflow signals so role engine won't enter read-only mode
     python3 -c "
 import json
-f='/Users/sammytan/.claude/role-cache/self-audit.json'
+    f='${ROLE_CACHE_DIR}/self-audit.json'
 try:
   d=json.load(open(f))
   d['signals']=[s for s in d.get('signals',[]) if s.get('type')!='context_overflow_error']
@@ -159,25 +205,25 @@ try:
 except: pass
 " 2>/dev/null || true
     # Release PM lease so role engine can acquire it
-    mv /Users/sammytan/.claude/role-cache/pm-lease.json /tmp/claude/pm-lease-daemon-backup.json 2>/dev/null || true
+    mv "${PM_LEASE_FILE}" /tmp/claude/pm-lease-daemon-backup.json 2>/dev/null || true
     # Run role engine to analyze gaps and create new tasks
     bash "${CI_CD_DIR}/scripts/claude-loop-role-engine.sh" all > /tmp/claude/role-engine-daemon.out 2>&1 || true
     tail -10 /tmp/claude/role-engine-daemon.out >> "${LOOP_LOG}" || true
     # Always restore PM lease to daemon (role engine may have left its own)
     if [[ -f /tmp/claude/pm-lease-daemon-backup.json ]]; then
-      mv /tmp/claude/pm-lease-daemon-backup.json /Users/sammytan/.claude/role-cache/pm-lease.json 2>/dev/null || true
+      mv /tmp/claude/pm-lease-daemon-backup.json "${PM_LEASE_FILE}" 2>/dev/null || true
     fi
     # Ensure daemon always holds a valid lease after role engine
     python3 -c "
 import json, time
 try:
-    with open('/Users/sammytan/.claude/role-cache/pm-lease.json') as f:
+    with open('${PM_LEASE_FILE}') as f:
         d = json.load(f)
     if d.get('agent') != 'claude-executor':
         raise ValueError('wrong agent')
 except:
     d = {'agent':'claude-executor','phase':'idle','started_at_epoch':time.time()}
-    with open('/Users/sammytan/.claude/role-cache/pm-lease.json','w') as f:
+    with open('${PM_LEASE_FILE}','w') as f:
         json.dump(d, f)
 " 2>/dev/null || true
 

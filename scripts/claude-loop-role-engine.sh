@@ -53,6 +53,31 @@ SELF_SCRIPT="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 SELF_ARGS=("$@")
 SELF_CI_CD_HEAD_AT_START="$(git -C "${CI_CD_DIR}" rev-parse HEAD 2>/dev/null || echo "")"
 
+init_role_cache() {
+  local preferred="${1:-${ROLE_CACHE_DIR}}"
+  ROLE_CACHE_DIR="${preferred}"
+  FINDINGS_FILE="${ROLE_CACHE_DIR}/findings.jsonl"
+  SELF_CREATE_STATUS_FILE="${ROLE_CACHE_DIR}/self-create-status.json"
+
+  if mkdir -p "${ROLE_CACHE_DIR}" 2>/dev/null && FINDINGS_FILE="${FINDINGS_FILE}" python3 - <<'PY' 2>/dev/null; then
+import os
+open(os.environ["FINDINGS_FILE"], "w", encoding="utf-8").close()
+PY
+    return 0
+  fi
+
+  ROLE_CACHE_DIR="/tmp/claude/role-cache"
+  FINDINGS_FILE="${ROLE_CACHE_DIR}/findings.jsonl"
+  SELF_CREATE_STATUS_FILE="${ROLE_CACHE_DIR}/self-create-status.json"
+  mkdir -p "${ROLE_CACHE_DIR}" 2>/dev/null || true
+  FINDINGS_FILE="${FINDINGS_FILE}" python3 - <<'PY' 2>/dev/null || true
+import os
+open(os.environ["FINDINGS_FILE"], "w", encoding="utf-8").close()
+PY
+}
+
+init_role_cache "${ROLE_CACHE_DIR}"
+
 hot_reload_if_ci_cd_updated() {
   local reason="${1:-ci-cd sync}"
   local current_head changed
@@ -862,14 +887,6 @@ PY
   fi
 }
 
-if ! mkdir -p "${ROLE_CACHE_DIR}" 2>/dev/null || ! : > "${FINDINGS_FILE}" 2>/dev/null; then
-  ROLE_CACHE_DIR="/tmp/claude/role-cache"
-  FINDINGS_FILE="${ROLE_CACHE_DIR}/findings.jsonl"
-  SELF_CREATE_STATUS_FILE="${ROLE_CACHE_DIR}/self-create-status.json"
-  mkdir -p "${ROLE_CACHE_DIR}" 2>/dev/null || true
-  : > "${FINDINGS_FILE}" 2>/dev/null || true
-fi
-
 BOLD="\033[1m" GREEN="\033[32m" YELLOW="\033[33m" RED="\033[31m" CYAN="\033[36m" RESET="\033[0m"
 H1() { echo -e "\n${BOLD}${CYAN}═══ $* ═══${RESET}"; }
 OK() { echo -e "  ${GREEN}[OK]${RESET} $*"; }
@@ -1219,7 +1236,9 @@ sync_all() {
 # ── PM Mutual Exclusion: prevent Claude and Codex from colliding ──────────────
 # Acquire PM lease before touching shared state. Stale leases (>15min) can be
 # taken over. Returns 0 if lease acquired, 1 if another agent is active.
-PM_LEASE_FILE="${PM_LEASE_FILE:-${ROLE_CACHE_DIR}/pm-lease.json}"
+if [[ -z "${PM_LEASE_FILE:-}" ]] || [[ "${ROLE_CACHE_DIR}" != "${HOME}/.claude/role-cache" && "${PM_LEASE_FILE:-}" == "${HOME}/.claude/role-cache/"* ]]; then
+  PM_LEASE_FILE="${ROLE_CACHE_DIR}/pm-lease.json"
+fi
 PM_LEASE_TTL_MIN=15
 
 acquire_pm_lease() {
@@ -1242,7 +1261,7 @@ except: print('?','?','999','?')
     if [[ "${holder}" == "${agent}" ]]; then
       # Same agent — renew lease
       :
-    elif [[ "${holder_phase}" == "complete" || "${holder_phase}" == "stale-auto-released" ]]; then
+    elif [[ "${holder_phase}" == "complete" || "${holder_phase}" == "stale-auto-released" || "${holder_phase}" == "idle" ]]; then
       echo -e "  ${YELLOW}[LEASE]${RESET} previous PM lease by '${holder}' is terminal (${holder_phase}) — reusing"
     elif [[ "${age_min}" -lt "${PM_LEASE_TTL_MIN}" ]]; then
       echo -e "  ${YELLOW}[WAIT]${RESET} PM lease held by '${holder}' (${age_min}min ago) — skipping to avoid collision"
