@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Send Lark card. Called from lark-notify.sh"""
-import json, sys, urllib.request, time, pathlib
+import json, os, sys, urllib.request, time, pathlib
 
 APP_ID = "cli_aa97755a49b8deef"
 APP_SECRET = "rhPVWWmy78WMIr4XLZjswbVyH270iDc4"
 USER_ID = "ou_8f472b84a9b3346116842dd0771a0275"
 TOKEN_CACHE = pathlib.Path("/tmp/claude/lark-token.json")
+DISPLAY_TZ = os.environ.get("LIVEMASK_DISPLAY_TZ", "Asia/Shanghai")
 
 def get_token():
     if TOKEN_CACHE.exists():
@@ -30,6 +31,23 @@ def send_card(title, color, content):
         return
     # Convert literal \n to actual newlines for proper formatting
     content = content.replace("\\n", "\n")
+    old_tz = os.environ.get("TZ")
+    try:
+        os.environ["TZ"] = DISPLAY_TZ
+        time.tzset()
+        display_time = time.strftime("%H:%M %Z", time.localtime())
+    except Exception:
+        display_time = time.strftime("%H:%M %Z", time.localtime())
+    finally:
+        if hasattr(time, "tzset"):
+            if old_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = old_tz
+            try:
+                time.tzset()
+            except Exception:
+                pass
     card = {
         "receive_id": USER_ID,
         "msg_type": "interactive",
@@ -39,7 +57,7 @@ def send_card(title, color, content):
             "elements": [
                 {"tag": "markdown", "content": content},
                 {"tag": "hr"},
-                {"tag": "note", "elements": [{"tag": "plain_text", "content": "LiveMask Engine · " + time.strftime('%H:%M', time.localtime())}]}
+                {"tag": "note", "elements": [{"tag": "plain_text", "content": "LiveMask Engine · " + display_time}]}
             ]
         })
     }
