@@ -50,11 +50,15 @@ require_present "closed-loop debt creates docs task" "PM-CLOSED-LOOP-DEBT"
 require_present "closed-loop audit is a self-create source" "autonomy-closed-loop-audit.sh"
 require_present "contract gap remains a self-create source" "Implement Ready contract gap"
 require_present "findings file remains a self-create source" "FINDINGS_FILE"
-require_present "issue linkage remains enforced" "no GitHub issue/comment or ledger issue reference found"
+require_present "issue URL guard remains enforced" "missing GitHub issue URL after issue guard"
+require_present "auto task ledger module reopens when ready task is added" "module\\['overall_status'\\] = 'partial'"
+require_present "failed docs landing removes generated task doc" 'rm -f "${task_doc}" "${dp_file}"'
+require_present "docs auto-create refreshes dev before merge" "git pull --ff-only origin dev"
 
 require_absent "old PM-3 no-auto-create instruction removed" "report Ready contract gaps for triage; do NOT auto-create"
 require_absent "old PM-3 NOT auto-creating banner removed" "NOT auto-creating"
 require_absent "broken inline Python fallback removed" "task creation skipped or failed"
+require_absent "ledger issue refs are not accepted as new TASK-AUTO issue linkage" "or d.get('ledger_issue_refs')"
 if awk '/^self_create_tasks_when_idle\(\)/,/^}/' "${ROLE_ENGINE}" | grep -q "| while IFS"; then
   fail "self-create while loops do not run in pipeline subshells"
 else
