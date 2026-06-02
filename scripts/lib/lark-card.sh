@@ -11,6 +11,7 @@ set -euo pipefail
 
 LARK_BOT_WEBHOOK="${LARK_BOT_WEBHOOK:-https://open.larksuite.com/open-apis/bot/v2/hook/803303ee-1632-4a99-8847-a071b3c832ad}"
 LARK_BOT_SECRET="${LARK_BOT_SECRET:-maVOYNybtveyeOzS5f73td}"
+LIVEMASK_DISPLAY_TZ="${LIVEMASK_DISPLAY_TZ:-Asia/Shanghai}"
 
 # ── Color/emoji helpers ──────────────────────────────────────────────────────
 _emoji() {
@@ -33,6 +34,14 @@ _color() {
   esac
 }
 
+lark_card_time_full() {
+  TZ="${LIVEMASK_DISPLAY_TZ}" date +"%Y-%m-%d %H:%M %Z" 2>/dev/null || date +"%Y-%m-%d %H:%M %Z"
+}
+
+lark_card_time_hm() {
+  TZ="${LIVEMASK_DISPLAY_TZ}" date +"%H:%M %Z" 2>/dev/null || date +"%H:%M %Z"
+}
+
 # ── Send a single card message ───────────────────────────────────────────────
 lark_card_send() {
   local title="${1:-LiveMask}"
@@ -41,7 +50,7 @@ lark_card_send() {
   local footer="${4:-}"
   local emoji; emoji=$(_emoji "${card_status}")
   local color; color=$(_color "${card_status}")
-  local ts; ts=$(date -u +"%Y-%m-%d %H:%M UTC")
+  local ts; ts="$(lark_card_time_full)"
 
   python3 - "${title}" "${emoji}" "${color}" "${body_lines}" "${footer}" "${ts}" "${LARK_BOT_WEBHOOK}" "${LARK_BOT_SECRET}" <<'PY'
 import base64, hashlib, hmac, json, os, sys, time, urllib.request
@@ -110,7 +119,7 @@ PY
 lark_card_batch() {
   local title="${1:-LiveMask Summary}"
   local cards_json="${2:-}"
-  local ts; ts=$(date -u +"%Y-%m-%d %H:%M UTC")
+  local ts; ts="$(lark_card_time_full)"
 
   python3 - "${title}" "${cards_json}" "${ts}" "${LARK_BOT_WEBHOOK}" "${LARK_BOT_SECRET}" <<'PY'
 import hashlib, hmac, json, os, sys, time, urllib.request, base64
@@ -220,5 +229,5 @@ Findings: **${findings}** | Auto-fixed: **${auto_fixed}** | Auto-created: **${au
 ✅ All checks passed — system healthy"
   fi
 
-  lark_card_send "${emoji} Role Engine: ${role}" "${card_st}" "${body}" "role-engine · $(date -u +%H:%M)Z"
+  lark_card_send "${emoji} Role Engine: ${role}" "${card_st}" "${body}" "role-engine · $(lark_card_time_hm)"
 }

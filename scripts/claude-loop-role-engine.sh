@@ -2914,7 +2914,7 @@ for f in findings[:10]:
 
   # Lark: aggregate summary card
   local total_findings; total_findings=$(wc -l < "${FINDINGS_FILE}" 2>/dev/null | tr -d ' ' || echo "0")
-  lark_card_batch "Role Engine All — $(date -u +%H:%M)Z" \
+  lark_card_batch "Role Engine All — $(lark_card_time_hm)" \
     "[{\"emoji\":\"📋\",\"label\":\"PM\",\"value\":\"${total_findings} findings\"},{\"emoji\":\"🎯\",\"label\":\"Product\",\"value\":\"MVP audit done\"},{\"emoji\":\"🔧\",\"label\":\"Tech\",\"value\":\"Swagger/DB/API check\"},{\"emoji\":\"🔍\",\"label\":\"QA\",\"value\":\"Evidence + bugs verified\"},{\"emoji\":\"🧾\",\"label\":\"Task Review\",\"value\":\"GitHub evidence chain\"}]" 2>/dev/null || true
   set -e
 
