@@ -102,6 +102,7 @@ elif repo == "livemask-ci-cd":
         "find scripts -name '*.sh' -exec bash -n {} \\; 2>&1"])
     add_check("workflow-syntax", ["bash", "scripts/validate-workflow-syntax.sh"], timeout=90)
     add_check("role-engine-flow", ["bash", "scripts/validate-role-engine-flow.sh"], timeout=30)
+    add_check("role-engine-self-create-smoke", ["bash", "scripts/role-engine-self-create-smoke.sh"], timeout=30)
     add_check("autonomy-closed-loop-audit-smoke", ["bash", "scripts/autonomy-closed-loop-audit-smoke.sh"], timeout=120)
     add_check("target-repo-task-bridge-smoke", ["bash", "scripts/target-repo-task-bridge-smoke.sh"], timeout=120)
     add_check("worker-harness-smoke", ["bash", "scripts/worker-harness-smoke.sh"], timeout=240)

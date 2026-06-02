@@ -673,6 +673,152 @@ pathlib.Path('${dp_file}').write_text(json.dumps(dp, indent=2))
   return 0
 }
 
+self_create_tasks_when_idle() {
+  local pkt_count="${1:-0}"
+  local created_before created_after
+  [[ "${pkt_count}" -eq 0 ]] || return 0
+
+  echo ""
+  echo -e "  ${BOLD}${YELLOW}[AUTO-FIX]${RESET} No dispatch packets — evaluating self-task creation sources"
+  created_before="$(echo "${AUTO_CREATED_TASKS:-}" | wc -w | tr -d ' ')"
+
+  local audit_file="${ROLE_CACHE_DIR}/idle-closed-loop-audit.json"
+  local debt blockers
+  if bash "${CI_CD_DIR}/scripts/autonomy-closed-loop-audit.sh" --output "${audit_file}" >/tmp/claude-role-engine-idle-audit.out 2>/dev/null; then
+    read -r debt blockers < <(python3 - "${audit_file}" <<'PY' 2>/dev/null || echo "0 0"
+import json, sys
+d = json.load(open(sys.argv[1]))
+s = d.get("summary", {})
+print(int(s.get("completion_debt_count", 0)), int(s.get("active_blocker_count", 0)))
+PY
+)
+    if [[ "${debt:-0}" -gt 0 ]]; then
+      auto_create_task "pm" "PM-CLOSED-LOOP-DEBT" \
+        "Backfill closed-loop completion evidence debt (${debt} task(s))" \
+        "P1" "livemask-docs" \
+        "Closed-loop audit found ${debt} completed task(s) with missing QA/review/leader evidence. Backfill or correct task docs, review contracts, ledger validation, and completion evidence. Audit artifact: ${audit_file}"
+      created_after="$(echo "${AUTO_CREATED_TASKS:-}" | wc -w | tr -d ' ')"
+      [[ "${created_after}" -gt "${created_before}" ]] && return 0
+    elif [[ "${blockers:-0}" -gt 0 ]]; then
+      auto_create_task "pm" "PM-CLOSED-LOOP-BLOCKERS" \
+        "Resolve active closed-loop blockers (${blockers} blocker(s))" \
+        "P1" "livemask-docs" \
+        "Closed-loop audit found active blocker(s) while the dispatch queue is empty. Resolve or reconcile blocker truth across task docs, ledger, review contracts, dispatch packets, and GitHub issue state. Audit artifact: ${audit_file}"
+      created_after="$(echo "${AUTO_CREATED_TASKS:-}" | wc -w | tr -d ' ')"
+      [[ "${created_after}" -gt "${created_before}" ]] && return 0
+    fi
+  else
+    WARN "idle self-create: closed-loop audit did not produce a usable artifact"
+  fi
+
+  while IFS='|' read -r gap_domain gap_repo gap_repos; do
+    [[ -z "${gap_domain:-}" || -z "${gap_repo:-}" ]] && continue
+    auto_create_task "pm" "PM-3" \
+      "Implement Ready contract gap: ${gap_domain}" \
+      "P1" "${gap_repo}" \
+      "Contract index has a Ready row without an implementation task. Repos column: ${gap_repos}. Create implementation evidence and dispatch from docs/contracts/contract-index.md."
+    created_after="$(echo "${AUTO_CREATED_TASKS:-}" | wc -w | tr -d ' ')"
+    [[ "${created_after}" -gt "${created_before}" ]] && return 0
+  done < <(python3 - "${DOCS_DIR}" <<'PY' 2>/dev/null
+import json, re, sys
+from pathlib import Path
+docs = Path(sys.argv[1])
+ledger = json.loads((docs / "docs/development/task-state-ledger.json").read_text())
+all_tasks = {t.get("task_id", "") for m in ledger.get("modules", []) for t in m.get("tasks", []) if t.get("task_id")}
+open_text = " ".join(
+    (t.get("notes", "") + " " + t.get("task_doc", "")).lower()
+    for m in ledger.get("modules", [])
+    for t in m.get("tasks", [])
+    if t.get("status") not in ("completed", "completed_with_skip", "cancelled")
+)
+repo_map = {
+    "Backend": "livemask-backend",
+    "Admin": "livemask-admin",
+    "App": "livemask-app",
+    "Website": "livemask-website",
+    "CI-CD": "livemask-ci-cd",
+    "CI/CD": "livemask-ci-cd",
+    "NodeAgent": "livemask-nodeagent",
+    "Job Service": "livemask-job-service",
+    "Jobs": "livemask-job-service",
+    "Docs": "livemask-docs",
+}
+ci = docs / "docs/contracts/contract-index.md"
+if ci.exists():
+    for line in ci.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "| Ready |" not in line:
+            continue
+        tasks_in_line = re.findall(r"TASK-[A-Z0-9-]+", line)
+        if tasks_in_line and any(tid in all_tasks for tid in tasks_in_line):
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 6:
+            continue
+        domain = (parts[1] or "unknown")[:80]
+        domain_key = re.sub(r"[^a-z0-9]+", "-", domain.lower()).strip("-")[:30]
+        if domain_key and domain_key in open_text:
+            continue
+        repos_raw = (parts[5] or "Backend")[:120]
+        first_repo = repos_raw.split("/")[0].strip()
+        repo = repo_map.get(first_repo, first_repo if first_repo.startswith("livemask-") else "livemask-backend")
+        print(f"{domain}|{repo}|{repos_raw}")
+        raise SystemExit
+PY
+)
+
+  while IFS='|' read -r role check repo title body; do
+    [[ -z "${title:-}" || -z "${repo:-}" ]] && continue
+    auto_create_task "${role:-pm}" "${check:-ROLE-FINDING}" "${title}" "P1" "${repo}" "${body}"
+    created_after="$(echo "${AUTO_CREATED_TASKS:-}" | wc -w | tr -d ' ')"
+    [[ "${created_after}" -gt "${created_before}" ]] && return 0
+  done < <(python3 - "${FINDINGS_FILE}" <<'PY' 2>/dev/null
+import json, re, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+if not path.exists():
+    raise SystemExit
+repo_re = re.compile(r"livemask-(backend|admin|app|website|ci-cd|nodeagent|job-service|docs)")
+seen = set()
+for row in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    try:
+        item = json.loads(row)
+    except Exception:
+        continue
+    sev = item.get("severity")
+    if sev not in {"blocker", "warning"}:
+        continue
+    text = " ".join(str(item.get(k, "")) for k in ("finding", "next", "cmd", "task_id"))
+    if "do NOT auto-create" in text or "do not auto-create" in text:
+        continue
+    match = repo_re.search(text)
+    repo = match.group(0) if match else "livemask-ci-cd"
+    key = (repo, item.get("check", ""), item.get("finding", ""))
+    if key in seen:
+        continue
+    seen.add(key)
+    title = item.get("finding", "")[:140] or f"Resolve role-engine finding {item.get('check', 'unknown')}"
+    body = f"Role-engine finding from {item.get('role','?')}/{item.get('check','?')}. Next: {item.get('next','')}. Suggested command: {item.get('cmd','')}. Existing task: {item.get('task_id','')}"
+    print("|".join([
+        item.get("role", "pm"),
+        item.get("check", "ROLE-FINDING"),
+        repo,
+        title.replace("|", "/"),
+        body.replace("|", "/"),
+    ]))
+    raise SystemExit
+PY
+)
+
+  created_after="$(echo "${AUTO_CREATED_TASKS:-}" | wc -w | tr -d ' ')"
+  if [[ "${created_after}" -eq "${created_before}" ]]; then
+    WARN "idle self-create found no safe source that passed duplicate/linkage guards"
+    record_finding "pm" "warning" "" "PM-IDLE-SELF-CREATE" \
+      "queue is empty and no self-created task passed closed-loop, contract, findings, duplicate, and issue-linkage guards" \
+      "inspect closed-loop audit, contract-index, findings.jsonl, and GitHub issue auth; do not declare autonomous creation healthy until a dispatch packet appears" \
+      "bash ${CI_CD_DIR}/scripts/claude-loop-role-engine.sh all"
+  fi
+}
+
 mkdir -p "${ROLE_CACHE_DIR}"
 : > "${FINDINGS_FILE}"  # truncate for this cycle
 
@@ -1708,11 +1854,11 @@ for s,c in statuses.most_common(8): print(f'{s}: {c}')
       echo "      status distribution:"
       echo "${status_dist}" | while read -r line; do echo "        ${line}"; done
 
-      NEXT "Action: if MVP complete → mark milestone. If tasks stuck → diagnose each stuck status. If no tasks → report gaps for human/Codex triage."
-      record_finding "pm" "warning" "" "PM-3" "dispatch queue empty (candidate_count=0)" "report Ready contract gaps for triage; do NOT auto-create" "bash scripts/claude-loop-role-engine.sh product"
-      # Gap detection only — NO auto-create. Auto-created TASK-AUTO tasks cause
-      # Claude↔Codex ping-pong (create→reconcile→create→reconcile) and block
-      # Claude executor from picking up real implementation work.
+      NEXT "Action: run self-task creation from closed-loop audit, Ready contract gaps, or actionable findings; created tasks must include issue, task doc, ledger entry, and dispatch packet."
+      record_finding "pm" "warning" "" "PM-3" "dispatch queue empty (candidate_count=0)" "create a closed-loop linked task from audit/contract/finding sources if one passes guards" "bash scripts/claude-loop-role-engine.sh all"
+      # Gap detection reports root cause here; the final all-role idle creation
+      # stage calls self_create_tasks_when_idle so task creation has full findings,
+      # closed-loop audit context, issue linkage, docs checks, and dispatch packet.
       python3 -c "
 import json, re
 from pathlib import Path
@@ -1760,12 +1906,12 @@ if ci.exists():
         for g in gaps[:10]: print(g)
 " 2>/dev/null | while IFS='|' read -r gap_domain gap_repo gap_repos gap_tid; do
         if [[ "${gap_domain}" == "GAPS_FOUND" ]]; then
-          WARN "PM-3: ${gap_repo} Ready contract gaps found — reporting for triage (NOT auto-creating)"
+          WARN "PM-3: ${gap_repo} Ready contract gaps found — queued for guarded self-task creation"
           continue
         fi
         [[ -z "${gap_domain}" || -z "${gap_repo}" ]] && continue
-        WARN "PM-3 gap: '${gap_domain}' (${gap_repo}) lacks implementation task — needs human/Codex dispatch"
-        record_finding "pm" "warning" "" "PM-3" "Ready contract gap: ${gap_domain} (${gap_repo}) has no implementation task" "create canonical TASK via startup dispatch; do NOT auto-create TASK-AUTO" ""
+        WARN "PM-3 gap: '${gap_domain}' (${gap_repo}) lacks implementation task — eligible for guarded self-task creation"
+        record_finding "pm" "warning" "" "PM-3" "Ready contract gap: ${gap_domain} (${gap_repo}) has no implementation task" "create canonical linked TASK with issue/doc/ledger/dispatch if duplicate guards pass" ""
       done
     else
       ASK "→ ${blocked} tasks are blocked — the queue IS the blocker list. Resolve root blockers to unblock candidates."
@@ -2994,93 +3140,12 @@ for f in findings[:10]:
 
   # ── AUTO-CREATE: create tasks if no dispatchable work exists ──
   # Check pkt_count (dispatch packets) NOT queue_count (planner candidates)
-  # because ready tasks without dispatch packets make queue_count>0 but pkt_count=0
+  # because ready tasks without dispatch packets make queue_count>0 but pkt_count=0.
   set +e
   local pkt_count; pkt_count=$(python3 -c "import pathlib; print(len(list(pathlib.Path('${DOCS_DIR}/docs/development/dispatch-packets').glob('TASK-*.json'))))" 2>/dev/null || echo "0")
   pkt_count=$(echo "${pkt_count}" | tr -d ' \n' || echo "0")
   [[ -z "${pkt_count}" ]] && pkt_count="0"
-  if [[ "${pkt_count}" -eq 0 ]]; then
-    echo ""
-    echo -e "  ${BOLD}${YELLOW}[AUTO-FIX]${RESET} No dispatch packets — auto-creating tasks"
-    # FIX 14: Try contract-index first, fallback to requirements-inbox, MVP plan, task README
-    python3 -c "
-import json, pathlib, datetime, re, subprocess, sys
-docs = pathlib.Path('${DOCS_DIR}')
-ledger = json.loads((docs / 'docs/development/task-state-ledger.json').read_text())
-all_tasks = {t['task_id'] for m in ledger['modules'] for t in m['tasks'] if t.get('task_id')}
-ci = docs / 'docs/contracts/contract-index.md'
-now = datetime.datetime.now(datetime.timezone.utc)
-created = 0
-if ci.exists():
-
-        # Validate contract format: check column count consistency
-        col_counts = set()
-        for line in ci.read_text().split('"'"'
-'"'"'):
-            if '"'"'| Ready |'"'"' in line or '"'"'| Stable |'"'"' in line:
-                parts = [p.strip() for p in line.split('"'"'|'"'"')]
-                col_counts.add(len(parts))
-        if len(col_counts) > 1:
-            print(f'"'"'  [PM-3] WARNING: contract-index.md has inconsistent column counts: {col_counts} — may cause mapping errors'"'"')
-            # Default to using max columns
-            pass
-    for line in ci.read_text().split('\n'):
-        if '| Ready |' not in line: continue
-        parts = [p.strip() for p in line.split('|')]
-        if len(parts) < 6: continue
-        domain = parts[1].strip()[:40] if len(parts) > 1 else 'unknown'
-        tasks_in_line = re.findall(r'TASK-[A-Z0-9-]+', line)
-        if any(t in all_tasks for t in tasks_in_line): continue
-        domain_key = domain.lower().replace(' ','-')[:15]
-        if any(domain_key in (t.get('notes','')+t.get('task_doc','')).lower() for m in ledger['modules'] for t in m['tasks'] if t.get('status') not in ('completed','completed_with_skip','cancelled')): continue
-        repos_raw = parts[5].strip()[:80] if len(parts) > 5 else 'Backend'
-        first_repo = repos_raw.split('/')[0].strip()
-        repo_map = {'Backend':'livemask-backend','Admin':'livemask-admin','App':'livemask-app','Website':'livemask-website','CI-CD':'livemask-ci-cd','CI/CD':'livemask-ci-cd','NodeAgent':'livemask-nodeagent','Job Service':'livemask-job-service','Jobs':'livemask-job-service','Docs':'livemask-docs'}
-        repo = repo_map.get(first_repo, 'livemask-backend')
-        tid = f\"TASK-{repo.replace('livemask-','').upper()}-{domain.upper().replace(' ','-')[:30]}-AUTO-{now.strftime('%Y%m%d%H%M%S')}\"
-        tid = re.sub(r'[^A-Z0-9-]','',tid)[:60]
-        if any(t.get('task_id')==tid for m in ledger['modules'] for t in m['tasks']): continue
-        # Create task doc
-        task_doc = docs / f'docs/development/tasks/{tid}.md'
-        task_doc.parent.mkdir(parents=True, exist_ok=True)
-        task_doc.write_text(f'# {tid}\\n\\n> Status: ready\\n> Repository: {repo}\\n> Priority: P1\\n> Created: {now.strftime(\"%Y-%m-%d\")}\\n\\n## 1. Background\\nAuto-created from Ready contract gap: {domain}\\n\\n## 2. Scope\\nImplement {domain} in {repo}.\\n\\n## 3. Acceptance Criteria\\n- [ ] Implementation complete\\n- [ ] Tests pass\\n- [ ] Build passes\\n\\n## 4. Cross-Repo Impact\\nThis task affects {repo}.\\n')
-        # Create dispatch packet
-        dispatch_dir = docs / 'docs/development/dispatch-packets'
-        dispatch_dir.mkdir(parents=True, exist_ok=True)
-        (dispatch_dir / f'{tid}.json').write_text(json.dumps({'schema_version':1,'task_id':tid,'repo':repo,'priority':'P1','readiness':'ready','assigned_to':'claude','assigned_at':now.strftime('%Y-%m-%dT%H:%M:%SZ'),'expires_at':(now+datetime.timedelta(hours=48)).strftime('%Y-%m-%dT%H:%M:%SZ'),'assigned_by':'Auto-Consumer','reason':f'Auto-created from Ready contract gap: {domain}'},indent=2))
-        # Create GitHub issue
-        try:
-            r = subprocess.run(['gh','issue','create','--repo',f'MyAiDevs/{repo}','--title',f'{tid}: {domain} Implementation','--body',f'Auto-created from Ready contract gap. Task doc: docs/development/tasks/{tid}.md'],capture_output=True,text=True,timeout=15)
-            issue_url = r.stdout.strip() if 'github.com' in r.stdout else ''
-        except: issue_url = ''
-        module_name = f'auto-{domain.lower().replace(\" \",\"-\")[:30]}'
-        found = False
-        for m in ledger['modules']:
-            if m.get('module_id') == module_name:
-                m['tasks'].append({'task_id':tid,'repo':repo,'module_id':module_name,'status':'ready','priority':'P1','task_doc':f'docs/development/tasks/{tid}.md','issue':issue_url,'validation':'','dev_merge_commit':'','remote_dev_ref':'','blocked_by':[],'unlocks':[],'notes':f'Auto-created from Ready contract gap. {now.strftime(\"%Y-%m-%d\")}'})
-                m['overall_status'] = 'partial'
-                found = True; break
-        if not found:
-            ledger['modules'].append({'module_id':module_name,'overall_status':'partial','owner_repo':repo,'tasks':[{'task_id':tid,'repo':repo,'module_id':module_name,'status':'ready','priority':'P1','task_doc':f'docs/development/tasks/{tid}.md','issue':issue_url,'validation':'','dev_merge_commit':'','remote_dev_ref':'','blocked_by':[],'unlocks':[],'notes':f'Auto-created from Ready contract gap. {now.strftime(\"%Y-%m-%d\")}'}],'open_gaps':[]})
-        created += 1
-        if created >= 4: break
-    ledger_path = docs / 'docs/development/task-state-ledger.json'
-    ledger_path.write_text(json.dumps(ledger, indent=2, ensure_ascii=False))
-    print(f'  [AUTO-CREATE] {created} tasks created from Ready contract gaps')
-" 2>/dev/null || echo "  [AUTO-CREATE] task creation skipped or failed"
-
-    # Commit and push if tasks created
-    cd "${DOCS_DIR}" 2>/dev/null
-    if [[ -n "$(git status --porcelain docs/development/tasks/ docs/development/dispatch-packets/ docs/development/task-state-ledger.json 2>/dev/null)" ]]; then
-      local auto_br="task/auto-create-$(date -u +%Y%m%d-%H%M%S)"
-      git checkout -b "${auto_br}" 2>/dev/null
-      git add docs/development/tasks/ docs/development/dispatch-packets/ docs/development/task-state-ledger.json 2>/dev/null
-      git commit -m "auto: create tasks from Ready contract gaps" 2>/dev/null
-      git checkout dev 2>/dev/null && git merge "${auto_br}" --no-edit 2>/dev/null && git push origin dev 2>/dev/null
-      echo "  [AUTO-PUSH] Tasks pushed to dev"
-    fi
-    cd "${CI_CD_DIR}" 2>/dev/null || true
-  fi
+  self_create_tasks_when_idle "${pkt_count}"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
