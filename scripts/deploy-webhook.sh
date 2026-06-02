@@ -83,5 +83,5 @@ echo "════════════════════════�
 echo "  Deploy complete"
 echo "  Lark URL: https://open.larksuite.com/open-apis/bot/v2/hook/803303ee-***"
 echo "  Webhook:  http://47.243.128.122:${PORT}"
-echo "  Log:      ssh ${SERVER} tail -f /var/log/livemask-webhook.log"
+echo "  Log:      ssh ${SERVER} tail -F /var/log/livemask-webhook.log"
 echo "═══════════════════════════════════════════"

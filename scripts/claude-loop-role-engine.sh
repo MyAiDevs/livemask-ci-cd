@@ -24,6 +24,7 @@ source "${SCRIPT_DIR}/lib/monitor-learn.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/lib/executor-guard.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/lib/event-bus.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/lib/impl-assist.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/lib/deepseek-engine.sh" 2>/dev/null || true
 log_setup "role-engine" 2>/dev/null || true
 memory_init 2>/dev/null || true
 monitor_init 2>/dev/null || true
@@ -2991,14 +2992,16 @@ for f in findings[:10]:
   local cycle_summary; cycle_summary="role-engine cycle $(date -u +%Y-%m-%dT%H:%MZ): ${total_findings} findings, docs_head=${NOW_SHA}"
   memory_put "role-engine-cycle-$(date -u +%Y%m%d-%H%M%S)" "cycle" "${cycle_summary}" "role-engine,cycle,auto" 2>/dev/null || true
 
-  # ── FIX BREAKPOINT 1: Auto-consume findings → create tasks if queue empty ──
-  set +e  # Don't let auto-create failures kill the cycle
-  local queue_count; queue_count=$(python3 "${DOCS_DIR}/scripts/plan-next-tasks.py" --format json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('summary',{}).get('candidate_count',0))" 2>/dev/null || echo "0")
-  queue_count=$(echo "${queue_count}" | tr -d ' \n' || echo "0")
-  [[ -z "${queue_count}" ]] && queue_count="0"
-  if [[ "${queue_count}" == "0" ]]; then
+  # ── AUTO-CREATE: create tasks if no dispatchable work exists ──
+  # Check pkt_count (dispatch packets) NOT queue_count (planner candidates)
+  # because ready tasks without dispatch packets make queue_count>0 but pkt_count=0
+  set +e
+  local pkt_count; pkt_count=$(python3 -c "import pathlib; print(len(list(pathlib.Path('${DOCS_DIR}/docs/development/dispatch-packets').glob('TASK-*.json'))))" 2>/dev/null || echo "0")
+  pkt_count=$(echo "${pkt_count}" | tr -d ' \n' || echo "0")
+  [[ -z "${pkt_count}" ]] && pkt_count="0"
+  if [[ "${pkt_count}" -eq 0 ]]; then
     echo ""
-    echo -e "  ${BOLD}${YELLOW}[AUTO-FIX]${RESET} Queue empty — auto-creating tasks"
+    echo -e "  ${BOLD}${YELLOW}[AUTO-FIX]${RESET} No dispatch packets — auto-creating tasks"
     # FIX 14: Try contract-index first, fallback to requirements-inbox, MVP plan, task README
     python3 -c "
 import json, pathlib, datetime, re, subprocess, sys
@@ -3028,6 +3031,8 @@ if ci.exists():
         domain = parts[1].strip()[:40] if len(parts) > 1 else 'unknown'
         tasks_in_line = re.findall(r'TASK-[A-Z0-9-]+', line)
         if any(t in all_tasks for t in tasks_in_line): continue
+        domain_key = domain.lower().replace(' ','-')[:15]
+        if any(domain_key in (t.get('notes','')+t.get('task_doc','')).lower() for m in ledger['modules'] for t in m['tasks'] if t.get('status') not in ('completed','completed_with_skip','cancelled')): continue
         repos_raw = parts[5].strip()[:80] if len(parts) > 5 else 'Backend'
         first_repo = repos_raw.split('/')[0].strip()
         repo_map = {'Backend':'livemask-backend','Admin':'livemask-admin','App':'livemask-app','Website':'livemask-website','CI-CD':'livemask-ci-cd','CI/CD':'livemask-ci-cd','NodeAgent':'livemask-nodeagent','Job Service':'livemask-job-service','Jobs':'livemask-job-service','Docs':'livemask-docs'}
