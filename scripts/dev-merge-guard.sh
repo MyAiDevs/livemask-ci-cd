@@ -35,6 +35,7 @@ Rules:
   - Creates rescue/<repo>-dev-before-<TASK>-<timestamp> from origin/dev.
   - Tests merge on integration/<TASK>-<timestamp> before touching dev.
   - Re-runs validation on dev before push.
+  - After a pushed merge, switches local checkout to dev and pulls origin/dev.
   - Never force-pushes and never merges task branches directly into main.
 EOF
 }
@@ -245,6 +246,13 @@ merge_or_abort() {
   fi
 }
 
+refresh_local_dev_after_push() {
+  info "refresh local dev from origin/dev after pushed merge"
+  git_in_repo fetch origin dev
+  git_in_repo checkout -B dev origin/dev
+  git_in_repo pull --ff-only origin dev
+}
+
 if [[ "${#validation_cmds[@]}" -eq 0 ]]; then
   while IFS= read -r cmd; do
     validation_cmds+=("${cmd}")
@@ -329,7 +337,9 @@ run_validation "dev" "${validation_cmds[@]}"
 dev_commit="$(git_in_repo rev-parse --short HEAD)"
 info "push dev to origin/dev"
 git_in_repo push origin dev
+refresh_local_dev_after_push
 remote_dev="$(git_in_repo ls-remote origin refs/heads/dev | awk '{print substr($1,1,7)}')"
+local_dev="$(git_in_repo rev-parse --short HEAD)"
 
 cat <<EOF
 
@@ -341,6 +351,7 @@ Task Branch: ${task_ref} ($(git_in_repo rev-parse --short "${task_ref}"))
 Integration Branch: ${integration_branch} (${integration_commit})
 Dev Merge Commit: ${dev_commit}
 Remote dev Ref: ${remote_dev}
+Local dev Ref: ${local_dev}
 Rescue Branch: ${rescue_branch}
 Validation on dev: PASS
 EOF
