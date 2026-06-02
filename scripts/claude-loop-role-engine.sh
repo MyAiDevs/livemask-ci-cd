@@ -35,6 +35,7 @@ DOCS_DIR="${LIVEMASK_ROOT}/livemask-docs"
 CI_CD_DIR="${LIVEMASK_ROOT}/livemask-ci-cd"
 ROLE_CACHE_DIR="${ROLE_CACHE_DIR:-${HOME}/.claude/role-cache}"
 FINDINGS_FILE="${ROLE_CACHE_DIR}/findings.jsonl"
+SELF_CREATE_STATUS_FILE="${ROLE_CACHE_DIR}/self-create-status.json"
 AGENT_STATE="${LIVEMASK_ROOT}/.claude/agent-state.json"
 LEASE_FILE="${DOCS_DIR}/docs/development/leases/task-leases.json"
 DISPATCH_DIR="${DOCS_DIR}/docs/development/dispatch-packets"
@@ -686,6 +687,31 @@ pathlib.Path('${dp_file}').write_text(json.dumps(dp, indent=2))
   return 0
 }
 
+write_self_create_status() {
+  local state="$1" reason="${2:-}" source="${3:-}" detail="${4:-}"
+  SELF_CREATE_STATUS_FILE="${SELF_CREATE_STATUS_FILE}" STATE="${state}" REASON="${reason}" SOURCE="${source}" DETAIL="${detail}" \
+    AUTO_CREATED_TASKS="${AUTO_CREATED_TASKS:-}" COORDINATION_DECISION="${COORDINATION_DECISION:-proceed}" \
+    COORDINATION_NEXT_ACTOR="${COORDINATION_NEXT_ACTOR:-claude-role-engine}" python3 - <<'PY' || true
+import json, os
+from datetime import datetime, timezone
+
+path = os.environ["SELF_CREATE_STATUS_FILE"]
+data = {
+    "schema_version": 1,
+    "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "state": os.environ.get("STATE", "unknown"),
+    "reason": os.environ.get("REASON", ""),
+    "source": os.environ.get("SOURCE", ""),
+    "detail": os.environ.get("DETAIL", ""),
+    "auto_created_tasks": [t for t in os.environ.get("AUTO_CREATED_TASKS", "").split() if t],
+    "coordination_decision": os.environ.get("COORDINATION_DECISION", "proceed"),
+    "coordination_next_actor": os.environ.get("COORDINATION_NEXT_ACTOR", "claude-role-engine"),
+}
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+PY
+}
+
 self_create_tasks_when_idle() {
   local pkt_count="${1:-0}"
   local created_before created_after
@@ -693,6 +719,7 @@ self_create_tasks_when_idle() {
 
   echo ""
   echo -e "  ${BOLD}${YELLOW}[AUTO-FIX]${RESET} No dispatch packets — evaluating self-task creation sources"
+  write_self_create_status "evaluating" "empty planner queue with zero dispatch packets" "idle-loop" "checking closed-loop audit, contract gaps, findings, duplicate guard, and issue linkage"
   created_before="$(echo "${AUTO_CREATED_TASKS:-}" | wc -w | tr -d ' ')"
 
   local audit_file="${ROLE_CACHE_DIR}/idle-closed-loop-audit.json"
@@ -824,16 +851,24 @@ PY
 
   created_after="$(echo "${AUTO_CREATED_TASKS:-}" | wc -w | tr -d ' ')"
   if [[ "${created_after}" -eq "${created_before}" ]]; then
+    write_self_create_status "skipped" "no safe self-create source passed all guards" "idle-loop" "inspect closed-loop audit, contract-index, findings.jsonl, duplicate guard, GitHub issue auth, and docs check log"
     WARN "idle self-create found no safe source that passed duplicate/linkage guards"
     record_finding "pm" "warning" "" "PM-IDLE-SELF-CREATE" \
       "queue is empty and no self-created task passed closed-loop, contract, findings, duplicate, and issue-linkage guards" \
       "inspect closed-loop audit, contract-index, findings.jsonl, and GitHub issue auth; do not declare autonomous creation healthy until a dispatch packet appears" \
       "bash ${CI_CD_DIR}/scripts/claude-loop-role-engine.sh all"
+  else
+    write_self_create_status "created" "self-create produced at least one task" "idle-loop" "created_count=$((created_after - created_before))"
   fi
 }
 
-mkdir -p "${ROLE_CACHE_DIR}"
-: > "${FINDINGS_FILE}"  # truncate for this cycle
+if ! mkdir -p "${ROLE_CACHE_DIR}" 2>/dev/null || ! : > "${FINDINGS_FILE}" 2>/dev/null; then
+  ROLE_CACHE_DIR="/tmp/claude/role-cache"
+  FINDINGS_FILE="${ROLE_CACHE_DIR}/findings.jsonl"
+  SELF_CREATE_STATUS_FILE="${ROLE_CACHE_DIR}/self-create-status.json"
+  mkdir -p "${ROLE_CACHE_DIR}" 2>/dev/null || true
+  : > "${FINDINGS_FILE}" 2>/dev/null || true
+fi
 
 BOLD="\033[1m" GREEN="\033[32m" YELLOW="\033[33m" RED="\033[31m" CYAN="\033[36m" RESET="\033[0m"
 H1() { echo -e "\n${BOLD}${CYAN}═══ $* ═══${RESET}"; }
@@ -876,7 +911,7 @@ claude_self_audit_gate() {
 record_finding() {
   local role="$1" severity="$2" task_id="${3:-}" check="$4" finding="$5" next="${6:-}" cmd="${7:-}"
   FINDINGS_FILE="${FINDINGS_FILE}" NOW_SHA_FULL="${NOW_SHA_FULL:-}" python3 - \
-    "${role}" "${severity}" "${task_id}" "${check}" "${finding}" "${next}" "${cmd}" <<'PY'
+    "${role}" "${severity}" "${task_id}" "${check}" "${finding}" "${next}" "${cmd}" <<'PY' || true
 import json, os, sys
 from datetime import datetime, timezone
 role, severity, task_id, check, finding, nxt, cmd = sys.argv[1:8]
@@ -919,6 +954,7 @@ path = os.environ["FINDINGS_FILE"]
 with open(path, "a", encoding="utf-8") as fh:
     fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
 PY
+  return 0
 }
 
 current_task_repo_hint() {
