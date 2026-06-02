@@ -11,7 +11,7 @@ set -euo pipefail
 LIVEMASK_ROOT="${LIVEMASK_ROOT:-/Users/sammytan/Developer/LiveMask}"
 DOCS_DIR="${LIVEMASK_ROOT}/livemask-docs"
 CI_CD_DIR="${LIVEMASK_ROOT}/livemask-ci-cd"
-ROLE_CACHE_DIR="${HOME}/.claude/role-cache"
+ROLE_CACHE_DIR="${ROLE_CACHE_DIR:-${HOME}/.claude/role-cache}"
 MEMORY_DIR="${HOME}/.claude/projects/-Users-sammytan-Developer-LiveMask/memory"
 
 # ── Phase 1: Startup Reasoning — "What should I work on and WHY?" ──────────

@@ -1,0 +1,216 @@
+schema_version: 1
+name: claude-loop-role-engine-flow
+description: Machine-readable execution flow for the LiveMask multi-role Claude loop.
+
+global:
+  fail_closed: true
+  required_before_any_role:
+    - read_flow_contract
+    - validate_repo_context
+    - run_health_check
+    - run_closed_loop_audit
+    - run_self_audit_gate
+    - inspect_runtime_logs
+    - inspect_task_environment_freshness
+  canonical_context:
+    docs_repo: /Users/sammytan/Developer/LiveMask/livemask-docs
+    ci_cd_repo: /Users/sammytan/Developer/LiveMask/livemask-ci-cd
+    task_ledger: docs/development/task-state-ledger.json
+    task_docs: docs/development/tasks
+    dispatch_packets: docs/development/dispatch-packets
+    review_contracts: docs/development/review-contracts
+    mvp_plan_candidates:
+      - docs/development/MVP_IMPLEMENTATION_PLAN.md
+      - docs/development/LiveMask_开发任务清单与里程碑_v3.6.md
+      - LiveMask_开发任务清单与里程碑_v3.6.md
+      - docs/development/README.md
+  hard_completion_gates:
+    - target_repo_handoff_prepared_for_runtime_tasks
+    - task_doc_status_matches_ledger
+    - review_contract_exists_and_qa_passed
+    - validation_evidence_present
+    - dev_merge_commit_present
+    - remote_dev_ref_present
+    - repo_native_verification_passed
+    - repo_smoke_or_explicit_skip_recorded
+  forbidden_global_actions:
+    - docs_only_progress_for_runtime_task
+    - mark_completed_without_dev_merge
+    - mark_completed_without_validation
+    - close_issue_without_ledger_and_review_contract
+    - create_duplicate_task_without_duplicate_scan
+    - implement_from_title_only
+    - template_code_generation_without_context_pack
+
+role_sequence:
+  - pm
+  - product
+  - tech
+  - qa
+  - task-review
+  - decision-summary
+
+roles:
+  pm:
+    phase: intake_and_queue_health
+    purpose: Determine whether work is flowing, blocked, duplicated, or falsely completed.
+    required_inputs:
+      - task_ledger
+      - dispatch_packets
+      - plan_next_tasks_json
+      - review_contracts
+      - github_control_issue_comments
+    allowed_actions:
+      - record_findings
+      - reconcile_only_when_review_contract_or_dev_merge_proves_completion
+      - report_queue_gap
+      - request_product_decomposition
+    forbidden_actions:
+      - create_task_from_weak_signal
+      - mark_completed_without_hard_completion_gates
+      - suppress_blocker_without_root_cause
+    must_emit:
+      - queue_candidate_count
+      - blocked_task_count
+      - doc_ledger_conflict_count
+      - next_actor_hint
+    exit_gates:
+      - findings_written_or_queue_healthy
+
+  product:
+    phase: roadmap_and_mvp_decomposition
+    purpose: Read MVP/task planning docs and convert real product gaps into canonical task work.
+    required_inputs:
+      - mvp_plan_candidates
+      - contract_index
+      - requirements_inbox
+      - task_ledger
+      - github_issue_candidates
+    allowed_actions:
+      - record_contract_gap
+      - record_mvp_ready_or_partial_items
+      - create_canonical_task_only_after_issue_or_context_link
+      - update_existing_task_instead_of_duplicate
+    forbidden_actions:
+      - ignore_mvp_plan_if_primary_file_missing
+      - create_task_without_context_pack
+      - create_task_without_duplicate_scan
+      - create_task_without_github_or_ledger_linkage
+    must_emit:
+      - mvp_docs_scanned
+      - mvp_ready_count
+      - mvp_partial_count
+      - inbox_count
+      - contract_gap_count
+    exit_gates:
+      - mvp_docs_scanned_or_blocker_recorded
+      - each_new_task_has_context_pack
+
+  tech:
+    phase: architecture_and_contract_integrity
+    purpose: Detect implementation-contract drift and cross-repo technical risk.
+    required_inputs:
+      - backend_routes
+      - swagger_or_openapi_specs
+      - recent_api_changes
+      - downstream_consumer_refs
+      - repo_native_patterns
+    allowed_actions:
+      - record_api_drift
+      - record_migration_risk
+      - record_cross_repo_impact
+      - propose_targeted_task
+    forbidden_actions:
+      - implement_runtime_code_from_role_engine
+      - create_new_helper_before_reuse_scan
+      - skip_downstream_impact_scan
+    must_emit:
+      - swagger_route_delta
+      - migration_risk_count
+      - impacted_repo_hints
+    exit_gates:
+      - drift_accounted_for_or_no_drift
+
+  qa:
+    phase: evidence_and_regression_gate
+    purpose: Validate that completion claims, tests, smoke checks, and bug evidence are real.
+    required_inputs:
+      - completed_or_verified_ledger_tasks
+      - review_contracts
+      - task_docs
+      - repo_native_verification_results
+      - smoke_results
+      - open_bug_issues
+    allowed_actions:
+      - mark_evidence_gap
+      - request_reimplementation
+      - record_regression_risk
+      - run_or_require_smoke
+    forbidden_actions:
+      - treat_smoke_failure_as_advisory_when_smoke_exists
+      - approve_without_acceptance_criteria_checked
+      - approve_without_repo_native_verification
+    must_emit:
+      - evidence_gap_count
+      - bug_count
+      - regression_risk_count
+      - qa_pass_fail_reason
+    exit_gates:
+      - qa_verdict_is_machine_readable
+
+  task-review:
+    phase: github_and_ledger_closure_audit
+    purpose: Audit GitHub issue state against task docs, ledger, review contracts, validation, and dev evidence.
+    required_inputs:
+      - github_issue_state
+      - github_issue_comments
+      - task_ledger
+      - task_docs
+      - review_contracts
+      - validation_evidence
+    allowed_actions:
+      - comment_open_issue_with_missing_evidence
+      - reopen_issue_when_evidence_missing
+      - record_closure_findings
+    forbidden_actions:
+      - close_epic_from_single_child_task
+      - close_ambiguous_issue_match
+      - close_completed_with_skip_without_explicit_acceptance
+    must_emit:
+      - issue_scan_count
+      - reopened_count
+      - ambiguous_match_count
+      - task_review_report
+    exit_gates:
+      - report_written
+
+modes:
+  all:
+    sequence: [pm, product, tech, qa, task-review, decision-summary]
+    fail_closed: true
+    forbidden_actions:
+      - skip_role_without_recorded_reason
+      - push_control_plane_changes_when_docs_checks_fail
+  --deep-review:
+    required_task_arg: true
+    required_inputs:
+      - task_doc
+      - review_contract
+      - git_diff
+      - repo_native_tests
+  --closure-audit:
+    required_task_arg: true
+    required_inputs:
+      - task_doc
+      - task_ledger
+      - review_contract
+      - dev_merge_commit
+      - remote_dev_ref
+      - validation_evidence
+  --impact-analysis:
+    required_task_arg: true
+    required_inputs:
+      - task_doc
+      - dependency_chain
+      - changed_files
+      - downstream_refs

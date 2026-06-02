@@ -33,7 +33,7 @@ event_init 2>/dev/null || true
 LIVEMASK_ROOT="/Users/sammytan/Developer/LiveMask"
 DOCS_DIR="${LIVEMASK_ROOT}/livemask-docs"
 CI_CD_DIR="${LIVEMASK_ROOT}/livemask-ci-cd"
-ROLE_CACHE_DIR="${HOME}/.claude/role-cache"
+ROLE_CACHE_DIR="${ROLE_CACHE_DIR:-${HOME}/.claude/role-cache}"
 FINDINGS_FILE="${ROLE_CACHE_DIR}/findings.jsonl"
 AGENT_STATE="${LIVEMASK_ROOT}/.claude/agent-state.json"
 LEASE_FILE="${DOCS_DIR}/docs/development/leases/task-leases.json"
@@ -3097,6 +3097,10 @@ fi
 
 # ── Proactive health check: catch problems before they become bugs ─────────
 health_check_all 2>/dev/null || true
+closed_loop_report="${ROLE_CACHE_DIR}/closed-loop-audit.json"
+if ! bash "${CI_CD_DIR}/scripts/autonomy-closed-loop-audit.sh" --output "${closed_loop_report}" --summary 2>/dev/null; then
+  echo "  [CLOSED-LOOP] audit command failed; inspect ${closed_loop_report}"
+fi
 claude_self_audit_gate 2>/dev/null || true
 
 RUNTIME_TASK_ID=""

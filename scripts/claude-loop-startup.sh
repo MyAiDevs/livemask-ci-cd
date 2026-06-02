@@ -1453,6 +1453,9 @@ case "${MODE}" in
     # Full startup: recovery + self-audit health + preflight + context + channels + cache
     run_recovery || true  # recovery warnings don't block
     health_check_all 2>/dev/null || true
+    bash "${CI_CD_DIR}/scripts/autonomy-closed-loop-audit.sh" \
+      --output "${ROLE_CACHE_DIR}/closed-loop-audit.json" \
+      --summary 2>/dev/null || true
     verify_runtime_and_environment || true
     quick_health_pulse
     preflight_rc=0

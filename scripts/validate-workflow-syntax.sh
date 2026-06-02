@@ -95,6 +95,11 @@ workflow_contracts = {
     "on" => ["pull_request", "push", "workflow_dispatch"],
     "jobs" => ["syntax"],
   },
+  ".github/workflows/webhook-notify.yml" => {
+    "name" => "Webhook Notify",
+    "on" => ["workflow_run"],
+    "jobs" => ["notify"],
+  },
 }
 
 workflow_paths = Dir.glob(".github/workflows/*.{yml,yaml}").sort
