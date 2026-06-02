@@ -100,6 +100,11 @@ elif repo == "livemask-ci-cd":
     # Bash syntax check all scripts
     add_check("bash-syntax", ["bash", "-c",
         "find scripts -name '*.sh' -exec bash -n {} \\; 2>&1"])
+    add_check("workflow-syntax", ["bash", "scripts/validate-workflow-syntax.sh"], timeout=90)
+    add_check("role-engine-flow", ["bash", "scripts/validate-role-engine-flow.sh"], timeout=30)
+    add_check("autonomy-closed-loop-audit-smoke", ["bash", "scripts/autonomy-closed-loop-audit-smoke.sh"], timeout=120)
+    add_check("target-repo-task-bridge-smoke", ["bash", "scripts/target-repo-task-bridge-smoke.sh"], timeout=120)
+    add_check("worker-harness-smoke", ["bash", "scripts/worker-harness-smoke.sh"], timeout=240)
     add_check("git-diff-check", ["git", "diff", "--check"])
     # Docker compose validation (if available)
     if (r / "infra/docker-compose.local.yml").exists():

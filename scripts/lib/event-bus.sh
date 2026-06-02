@@ -19,7 +19,8 @@ set -euo pipefail
 LIVEMASK_ROOT="${LIVEMASK_ROOT:-/Users/sammytan/Developer/LiveMask}"
 DOCS_DIR="${LIVEMASK_ROOT}/livemask-docs"
 CI_CD_DIR="${LIVEMASK_ROOT}/livemask-ci-cd"
-EVENT_DIR="${HOME}/.claude/role-cache/events"
+ROLE_CACHE_DIR="${ROLE_CACHE_DIR:-${HOME}/.claude/role-cache}"
+EVENT_DIR="${ROLE_CACHE_DIR}/events"
 EVENT_LOG="${EVENT_DIR}/event-log.jsonl"
 EVENT_STATE="${EVENT_DIR}/event-state.json"
 
@@ -29,6 +30,23 @@ event_init() {
   if [[ ! -f "${EVENT_STATE}" ]]; then
     echo '{"schema_version":1,"last_event_at":"","event_counts":{},"active_task_id":"","active_task_phase":""}' > "${EVENT_STATE}"
   fi
+}
+
+event_task_repo() {
+  local task_id="${1:-}"
+  [[ -z "${task_id}" ]] && return 0
+  python3 -c "
+import json
+try:
+    ledger=json.load(open('${DOCS_DIR}/docs/development/task-state-ledger.json'))
+    for module in ledger.get('modules', []):
+        for task in module.get('tasks', []):
+            if task.get('task_id') == '${task_id}':
+                print(task.get('repo') or task.get('owner_repo') or '')
+                raise SystemExit
+except Exception:
+    pass
+" 2>/dev/null || true
 }
 
 event_emit() {
@@ -61,11 +79,14 @@ state_path.write_text(json.dumps(state,indent=2,ensure_ascii=False))
       executor_log_evidence "${task_id}" "accepted" "Task accepted by daemon" 2>/dev/null || true
       (event_react_product_progress "${task_id}" 2>/dev/null || true) & ;;
     code_committed)
+      local committed_repo; committed_repo="$(event_task_repo "${task_id}")"
       (event_react_tech_commit_check "${task_id}" 2>/dev/null || true) &
       # Auto-trigger skills on commit: code-review + security-review + verify
       skill_code_review "${task_id}" 2>/dev/null || true
       skill_security_review "${task_id}" 2>/dev/null || true
-      (skill_verify "${repo}" 2>/dev/null || true) &  # Async: don't block the event chain
+      if [[ -n "${committed_repo}" ]]; then
+        (skill_verify "${committed_repo}" 2>/dev/null || true) &  # Async: don't block the event chain
+      fi
       executor_renew_lease "claude-executor" "${task_id}" 2>/dev/null || true ;;
     review_submitted)
       (event_react_leader_review "${task_id}" 2>/dev/null || true) &
@@ -100,7 +121,7 @@ state_path.write_text(json.dumps(state,indent=2,ensure_ascii=False))
       event_react_pm_cycle_close "${task_id}" 2>/dev/null || true
       (event_react_product_progress "${task_id}" 2>/dev/null || true) &
       monitor_analyze_event "task_completed" "${task_id}" 2>/dev/null || true
-      python3 -c "import json,pathlib; p=pathlib.Path('${HOME}/.claude/role-cache/pm-lease.json');
+      python3 -c "import json,pathlib; p=pathlib.Path('${ROLE_CACHE_DIR}/pm-lease.json');
 if p.exists(): d=json.loads(p.read_text()); d['phase']='complete'; d['completed_at']='$(date -u +%Y-%m-%dT%H:%M:%SZ)'; p.write_text(json.dumps(d,indent=2))" 2>/dev/null || true
       echo "  [EVENT] Task completed — PM lease released"
       # Remove dispatch packet so daemon does not re-accept
@@ -117,7 +138,6 @@ if p.exists(): d=json.loads(p.read_text()); d['phase']='complete'; d['completed_
 event_react_pm_task_accepted() {
   local tid="${1:-}"
   echo "  [PM] Task accepted: ${tid}"
-  source "${CI_CD_DIR}/scripts/lib/lark-notify.sh" 2>/dev/null && lark_notify_task_accepted "${tid}" "${repo}" "P1" 2>/dev/null || true
   # FIX 2: Auto-accept with rollback on failure
   source "${CI_CD_DIR}/scripts/lib/executor-guard.sh" 2>/dev/null || true
 
@@ -141,7 +161,8 @@ now=datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 agent_state={'phase':'implementing','current_task':{'task_id':'${tid}','target_repo':repo,'task_phase':'implementing','accepted_at':now},'last_action':'auto-accepted via event bus','updated_at':now}
 (root/'.claude/agent-state.json').write_text(json.dumps(agent_state,indent=2))
 print(repo)
-" 2>/dev/null || echo "")
+	" 2>/dev/null || echo "")
+  source "${CI_CD_DIR}/scripts/lib/lark-notify.sh" 2>/dev/null && lark_notify_task_accepted "${tid}" "${repo}" "P1" 2>/dev/null || true
 
   # Step 3: Acquire PM lease — ROLLBACK if write fails
   if ! executor_renew_lease "claude-executor" "${tid}" 2>/dev/null; then
@@ -280,7 +301,7 @@ pathlib.Path(str(docs/'docs/development/task-state-ledger.json')).write_text(jso
 event_react_pm_diagnose_blocker() {
   local tid="${1:-}"
   echo "  [PM] Diagnosing blocker: ${tid}"
-  local lease_file="${HOME}/.claude/role-cache/pm-lease.json"
+  local lease_file="${ROLE_CACHE_DIR}/pm-lease.json"
   if [[ -f "${lease_file}" ]]; then
     python3 -c "import json,time; d=json.load(open('${lease_file}')); age=(time.time()-d.get('started_at_epoch',0))/60; print(f'  [PM] PM lease: {d.get(\"agent\",\"?\")} ({age:.0f}min)'+(' — POSSIBLE DEADLOCK' if age>30 else ''))" 2>/dev/null || true
   fi

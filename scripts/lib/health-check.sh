@@ -9,7 +9,7 @@ set -euo pipefail
 LIVEMASK_ROOT="${LIVEMASK_ROOT:-/Users/sammytan/Developer/LiveMask}"
 DOCS_DIR="${LIVEMASK_ROOT}/livemask-docs"
 CI_CD_DIR="${LIVEMASK_ROOT}/livemask-ci-cd"
-ROLE_CACHE_DIR="${HOME}/.claude/role-cache"
+ROLE_CACHE_DIR="${ROLE_CACHE_DIR:-${HOME}/.claude/role-cache}"
 
 RED="\033[31m" YELLOW="\033[33m" GREEN="\033[32m" RESET="\033[0m"
 PASS() { echo -e "  ${GREEN}[HEALTH OK]${RESET} $*"; }
