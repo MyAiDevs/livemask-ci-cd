@@ -73,7 +73,7 @@ server_restart() {
 # ── Fetch remote events to local ────────────────────────────────────────
 server_fetch_events() {
   echo "=== Fetching remote events ==="
-  local local_dir="${HOME}/.claude/role-cache/webhook-events"
+  local local_dir="${ROLE_CACHE_DIR:-${HOME}/.claude/role-cache}/webhook-events"
   mkdir -p "${local_dir}"
   scp ${SSH_OPTS} "${SERVER_HOST}:${REMOTE_DIR}/events/*.jsonl" "${local_dir}/" 2>/dev/null && echo "  Events synced" || echo "  No events to sync"
 }
