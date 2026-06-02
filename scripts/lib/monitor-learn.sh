@@ -87,10 +87,23 @@ print(f'  [Monitor] Observed: {event_type} {task_id}')
 
   # Analyze immediately (real-time, not batch)
   monitor_analyze_event "${event_type}" "${task_id}" 2>/dev/null || true
+  # DeepSeek: deep pattern analysis for recurring issues
+  if [[ -n "${DEEPSEEK_API_KEY:-}" && -f "${PATTERNS_FILE}" ]]; then
+    local recent; recent=$(tail -20 "${OBSERVATIONS_FILE}" 2>/dev/null | head -500 || echo "")
+    [[ -n "${recent}" ]] && ds_monitor_analyze "${recent}" 2>/dev/null | tail -10 &
+  fi
 }
 
 # ── Analyze single event in real-time ────────────────────────────────────
 monitor_analyze_event() {
+
+  # Detect repeated crash recovery pattern
+  local crash_count; crash_count=$(grep -c "crash recovery" "${LOOP_LOG:-/tmp/claude/autonomous-loop.log}" 2>/dev/null || echo 0)
+  if [[ "${crash_count}" -gt 5 ]]; then
+    echo "  [Monitor] WARNING: ${crash_count} crash recoveries detected — possible bug!"
+    executor_notify_human "crash_loop" "Monitor detected ${crash_count} crash recoveries — agent may be stuck" 2>/dev/null || true
+    ds_monitor_analyze "Repeated crash recovery detected (${crash_count} times). Agent phase stuck. Root cause analysis needed." 2>/dev/null &
+  fi
   local event_type="${1:-}" task_id="${2:-}"
   monitor_init
 
@@ -365,4 +378,244 @@ monitor_scan_techdebt() {
   done
   echo "  [TechDebt] Total TODOs across repos: ${todo_count}"
   [[ "${todo_count}" -gt 50 ]] && executor_notify_human "tech_debt" "${todo_count} TODOs across codebase"
+}
+
+# ── Active log monitor (runs in background, watches daemon log) ───────
+monitor_watch_log() {
+  local log_file="${1:-/tmp/claude/autonomous-loop.log}"
+  local pid_file="${ROLE_CACHE_DIR}/monitor-log-watcher.pid"
+  
+  # Prevent duplicate watchers
+  if [[ -f "${pid_file}" ]]; then
+    local old_pid; old_pid=$(cat "${pid_file}" 2>/dev/null || echo "0")
+    if kill -0 "${old_pid}" 2>/dev/null; then return 0; fi
+  fi
+  
+  echo $$ > "${pid_file}"
+  
+  # Use tail -F to follow even if log file is rotated
+  tail -F "${log_file}" 2>/dev/null | while read -r line; do
+    [[ -z "${line}" ]] && continue
+    
+    # Detect error patterns
+    if echo "${line}" | grep -q "FAILED\|ERROR\|crash recovery\|dead.loop\|cannot renew\|DEAD\|假活"; then
+      local err_type="unknown"
+      if echo "${line}" | grep -q "crash recovery"; then err_type="crash_loop"
+      elif echo "${line}" | grep -q "cannot renew"; then err_type="pm_lease_conflict"
+      elif echo "${line}" | grep -q "DEAD\|假活"; then err_type="liveness_false_positive"
+      elif echo "${line}" | grep -q "FAILED"; then err_type="operation_failed"
+      fi
+      
+      # Increment error counter
+      local err_file="${ROLE_CACHE_DIR}/monitor/error-${err_type}.count"
+      local count; count=$(cat "${err_file}" 2>/dev/null || echo "0")
+      count=$((count + 1))
+      echo "${count}" > "${err_file}"
+      
+      # Alert on threshold
+      if [[ "${count}" -ge 5 ]]; then
+        echo "  [Monitor/LogWatch] ALERT: ${err_type} occurred ${count} times!"
+        executor_push_alert "${err_type}" "Monitor detected ${count} occurrences of ${err_type}" 2>/dev/null || true
+        
+        # Self-heal: kill and restart daemon if crash-loop detected
+        if [[ "${err_type}" == "crash_loop" && "${count}" -ge 10 ]]; then
+          echo "  [Monitor/LogWatch] SELF-HEAL: restarting daemon due to crash loop"
+          local daemon_pid; daemon_pid=$(cat "${ROLE_CACHE_DIR}/autonomous-loop.pid" 2>/dev/null || echo "")
+          [[ -n "${daemon_pid}" ]] && kill "${daemon_pid}" 2>/dev/null || true
+          sleep 2
+          nohup bash "${CI_CD_DIR}/scripts/autonomous-loop.sh" &>/tmp/claude/autonomous-loop-stdout.log &
+          # Reset counter
+          echo "0" > "${err_file}"
+        fi
+      fi
+    fi
+    
+    # Detect success patterns - reset counters
+    if echo "${line}" | grep -q "TASK COMPLETED\|MERGE.*Successfully\|QA.*PASS"; then
+      for f in "${ROLE_CACHE_DIR}/monitor/error-"*.count; do
+        [[ -f "${f}" ]] && echo "0" > "${f}"
+      done 2>/dev/null || true
+    fi
+  done
+}
+
+# Start log watcher in background
+monitor_start_log_watcher() {
+  monitor_watch_log "/tmp/claude/autonomous-loop.log" &
+  echo "  [Monitor] Log watcher started (PID: $!)"
+}
+
+# ── Self-diagnosis: detect ineffective operations ────────────────────
+monitor_self_diagnose() {
+  local loop_log="${1:-/tmp/claude/autonomous-loop.log}"
+  
+  # Pattern: "No work" → "running role engine" → "Still no work" repeated
+  local no_work_cycles; no_work_cycles=$(grep -c "Still no work\|No work — running" "${loop_log}" 2>/dev/null || echo "0")
+  local completed_cycles; completed_cycles=$(grep -c "TASK COMPLETED\|task_completed" "${loop_log}" 2>/dev/null || echo "0")
+  
+  if [[ "${no_work_cycles}" -gt 3 && "${completed_cycles}" -eq 0 ]]; then
+    echo "  [Monitor/Diag] WARNING: ${no_work_cycles} no-work cycles with 0 completions — possible gap detection failure"
+    
+    # Self-diagnose: check if contracts have gaps that AUTO-CREATE missed
+    local gap_count; gap_count=$(python3 -c "
+import json,re,pathlib
+docs=pathlib.Path('${DOCS_DIR:-/Users/sammytan/Developer/LiveMask/livemask-docs}')
+ledger=json.loads((docs/'docs/development/task-state-ledger.json').read_text())
+all_tasks={t['task_id'] for m in ledger['modules'] for t in m['tasks']}
+ci=docs/'docs/contracts/contract-index.md'
+gaps=0
+if ci.exists():
+    for line in ci.read_text().split('\n'):
+        if '| Ready |' not in line: continue
+        parts=[p.strip() for p in line.split('|')]
+        if len(parts)<6: continue
+        domain=parts[1]
+        tids=re.findall(r'TASK-[A-Z0-9-]+',line)
+        covered=any(t in all_tasks for t in tids)
+        if not covered: gaps+=1
+print(gaps)
+" 2>/dev/null || echo "0")
+    
+    if [[ "${gap_count}" -gt 0 ]]; then
+      echo "  [Monitor/Diag] FOUND: ${gap_count} contract gaps exist but AUTO-CREATE didn't detect them!"
+      echo "  [Monitor/Diag] SELF-HEAL: triggering gap detection fix..."
+      
+      # Force-create tasks from gaps
+      python3 -c "
+import json,re,pathlib,datetime,subprocess
+docs=pathlib.Path('${DOCS_DIR:-/Users/sammytan/Developer/LiveMask/livemask-docs}')
+ledger=json.loads((docs/'docs/development/task-state-ledger.json').read_text())
+all_tasks={t['task_id'] for m in ledger['modules'] for t in m['tasks']}
+ci=docs/'docs/contracts/contract-index.md'
+now=datetime.datetime.now(datetime.timezone.utc)
+created=0
+if ci.exists():
+    for line in ci.read_text().split('\n'):
+        if '| Ready |' not in line: continue
+        parts=[p.strip() for p in line.split('|')]
+        if len(parts)<6: continue
+        domain=parts[1][:40]
+        tids=re.findall(r'TASK-[A-Z0-9-]+',line)
+        domain_key=domain.lower().replace(' ','-')[:15]
+        # Check both exact TASK-ID match AND domain-based coverage
+        if any(t in all_tasks for t in tids): continue
+        if any(domain_key in (t.get('notes','')+t.get('task_doc','')).lower() for m in ledger['modules'] for t in m['tasks'] if t.get('status') not in ('completed','completed_with_skip','cancelled')): continue
+        repos_raw=parts[5][:80]
+        first_repo=repos_raw.split('/')[0].strip()
+        repo_map={'Backend':'livemask-backend','Admin':'livemask-admin','App':'livemask-app','Website':'livemask-website','CI-CD':'livemask-ci-cd','CI/CD':'livemask-ci-cd','NodeAgent':'livemask-nodeagent','Job Service':'livemask-job-service','Jobs':'livemask-job-service','Docs':'livemask-docs'}
+        repo=repo_map.get(first_repo,'livemask-backend')
+        tid=f'TASK-{repo.replace(\"livemask-\",\"\").upper()}-{domain.upper().replace(\" \",\"-\")[:20]}-MONITOR-{now.strftime(\"%Y%m%d%H%M%S\")}'
+        tid=re.sub(r'[^A-Z0-9-]','',tid)[:60]
+        if any(t.get('task_id')==tid for m in ledger['modules'] for t in m['tasks']): continue
+        # Create dispatch packet
+        dp_dir=docs/'docs/development/dispatch-packets'; dp_dir.mkdir(parents=True,exist_ok=True)
+        (dp_dir/f'{tid}.json').write_text(json.dumps({'schema_version':1,'task_id':tid,'repo':repo,'priority':'P1','readiness':'ready','assigned_to':'claude','assigned_at':now.strftime('%Y-%m-%dT%H:%M:%SZ'),'expires_at':(now+datetime.timedelta(hours=48)).strftime('%Y-%m-%dT%H:%M:%SZ'),'assigned_by':'Monitor-Self-Heal','reason':f'Contract gap: {domain}'},indent=2))
+        # Task doc
+        (docs/'docs/development/tasks'/f'{tid}.md').parent.mkdir(parents=True,exist_ok=True)
+        (docs/'docs/development/tasks'/f'{tid}.md').write_text(f'# {tid}\\n\\n> Status: ready\\n> Repository: {repo}\\n> Priority: P1\\n\\n## 1. Background\\nMonitor self-heal: detected contract gap for {domain}.\\n\\n## 2. Scope\\nImplement {domain} in {repo}.\\n\\n## 3. Acceptance Criteria\\n- [ ] Implementation complete\\n- [ ] Tests pass\\n- [ ] Build passes\\n\\n## 4. Cross-Repo Impact\\n{repos_raw}')
+        # Ledger
+        found=False
+        for m in ledger['modules']:
+            if m.get('module_id')==f'monitor-{domain_key}':
+                m['tasks'].append({'task_id':tid,'repo':repo,'module_id':m['module_id'],'status':'ready','priority':'P1','task_doc':f'docs/development/tasks/{tid}.md','issue':'','notes':f'Monitor self-heal from gap detection failure. {now.strftime(\"%Y-%m-%d\")}'})
+                found=True; break
+        if not found:
+            ledger['modules'].append({'module_id':f'monitor-{domain_key}','overall_status':'partial','owner_repo':repo,'tasks':[{'task_id':tid,'repo':repo,'module_id':f'monitor-{domain_key}','status':'ready','priority':'P1','task_doc':f'docs/development/tasks/{tid}.md','issue':'','notes':f'Monitor self-heal from gap detection failure. {now.strftime(\"%Y-%m-%d\")}'}]})
+        created+=1
+        if created>=3: break
+    (docs/'docs/development/task-state-ledger.json').write_text(json.dumps(ledger,indent=2,ensure_ascii=False))
+    print(f'  [Monitor/SelfHeal] Created {created} tasks from undetected gaps')
+" 2>/dev/null || true
+      
+      # Commit and push
+      cd "${DOCS_DIR:-/Users/sammytan/Developer/LiveMask/livemask-docs}" 2>/dev/null || true
+      git add docs/development/tasks/ docs/development/dispatch-packets/ docs/development/task-state-ledger.json 2>/dev/null
+      if ! git diff --cached --quiet 2>/dev/null; then
+        local br="task/monitor-self-heal-$(date -u +%Y%m%d-%H%M%S)"
+        git checkout -b "${br}" 2>/dev/null && git commit -m "fix: Monitor self-heal — create tasks from undetected contract gaps" 2>/dev/null && git push origin "${br}" 2>/dev/null
+      fi
+    else
+      echo "  [Monitor/Diag] No contract gaps — queue is genuinely empty"
+    fi
+  fi
+}
+
+# ── Detect silent role-engine crash ────────────────────────────────────
+monitor_check_role_engine_health() {
+  local output_file="/tmp/claude/role-engine-daemon.out"
+  
+  # Check if output file exists and is empty (silent crash)
+  if [[ -f "${output_file}" ]] && [[ ! -s "${output_file}" ]]; then
+    echo "  [Monitor] CRITICAL: Role engine output is EMPTY — silent crash detected!"
+    
+    # Self-diagnose: check scripts for syntax errors
+    local syntax_errors; syntax_errors=$(find "${CI_CD_DIR}/scripts" -name "*.sh" -exec bash -n {} \; 2>&1 | grep -c "syntax error" || echo "0")
+    if [[ "${syntax_errors}" -gt 0 ]]; then
+      echo "  [Monitor] Found ${syntax_errors} syntax errors in scripts — attempting auto-fix..."
+      # Run syntax check and log results
+      find "${CI_CD_DIR}/scripts" -name "*.sh" -exec bash -n {} \; 2>&1 | grep "syntax error" | while read err; do
+        echo "  [Monitor] Syntax error: ${err:0:120}"
+      done
+    fi
+    
+    # Check if contract gaps exist but no tasks created
+    local gap_count; gap_count=$(python3 -c "
+import json,re,pathlib
+docs=pathlib.Path('${DOCS_DIR:-/Users/sammytan/Developer/LiveMask/livemask-docs}')
+ledger=json.loads((docs/'docs/development/task-state-ledger.json').read_text())
+all_tasks={t['task_id'] for m in ledger['modules'] for t in m['tasks']}
+ci=docs/'docs/contracts/contract-index.md'
+gaps=0
+if ci.exists():
+    for line in ci.read_text().split('\n'):
+        if '| Ready |' not in line: continue
+        parts=[p.strip() for p in line.split('|')]
+        if len(parts)<6: continue
+        tids=re.findall(r'TASK-[A-Z0-9-]+',line)
+        domain_key=parts[1][:40].lower().replace(' ','-')[:15]
+        if any(t in all_tasks for t in tids): continue
+        if any(domain_key in (t.get('notes','')+t.get('task_doc','')).lower() for m in ledger['modules'] for t in m['tasks'] if t.get('status') not in ('completed','completed_with_skip','cancelled')): continue
+        gaps+=1
+print(gaps)
+" 2>/dev/null || echo "0")
+    
+    if [[ "${gap_count}" -gt 0 ]]; then
+      echo "  [Monitor] ${gap_count} contract gaps exist but AUTO-CREATE failed — triggering manual creation..."
+      # Directly create tasks (bypass AUTO-CREATE)
+      python3 -c "
+import json,re,pathlib,datetime
+docs=pathlib.Path('/Users/sammytan/Developer/LiveMask/livemask-docs')
+ledger=json.loads((docs/'docs/development/task-state-ledger.json').read_text())
+now=datetime.datetime.now(datetime.timezone.utc)
+created=0
+ci=docs/'docs/contracts/contract-index.md'
+repo_map={'Backend':'livemask-backend','Admin':'livemask-admin','App':'livemask-app','Website':'livemask-website','CI-CD':'livemask-ci-cd','CI/CD':'livemask-ci-cd','NodeAgent':'livemask-nodeagent','Job Service':'livemask-job-service','Docs':'livemask-docs'}
+all_tasks={t['task_id'] for m in ledger['modules'] for t in m['tasks']}
+for line in ci.read_text().split('\n'):
+    if '| Ready |' not in line: continue
+    parts=[p.strip() for p in line.split('|')]
+    if len(parts)<6: continue
+    domain=parts[1][:40]; tids=re.findall(r'TASK-[A-Z0-9-]+',line)
+    domain_key=domain.lower().replace(' ','-')[:15]
+    if any(t in all_tasks for t in tids): continue
+    if any(domain_key in (t.get('notes','')+t.get('task_doc','')).lower() for m in ledger['modules'] for t in m['tasks'] if t.get('status') not in ('completed','completed_with_skip','cancelled')): continue
+    repos_raw=parts[5][:80]; first_repo=repos_raw.split('/')[0].strip()
+    repo=repo_map.get(first_repo,'livemask-backend')
+    tid=f'TASK-{repo.replace(\"livemask-\",\"\").upper()}-{domain.upper().replace(\" \",\"-\")[:20]}-MON-{now.strftime(\"%Y%m%d%H%M%S\")}'
+    tid=re.sub(r'[^A-Z0-9-]','',tid)[:60]
+    (docs/f'docs/development/tasks/{tid}.md').parent.mkdir(parents=True,exist_ok=True)
+    (docs/f'docs/development/tasks/{tid}.md').write_text(f'# {tid}\n\n> Status: ready\n> Repository: {repo}\n> Priority: P1\n\n## 1. Background\nMonitor self-heal from AUTO-CREATE failure: {domain}\n\n## 2. Scope\nImplement {domain} in {repo}.\n\n## 3. Acceptance Criteria\n- [ ] Implementation complete\n- [ ] Tests pass\n- [ ] Build passes\n\n## 4. Cross-Repo Impact\n{repos_raw}')
+    (docs/'docs/development/dispatch-packets'/f'{tid}.json').parent.mkdir(parents=True,exist_ok=True)
+    (docs/'docs/development/dispatch-packets'/f'{tid}.json').write_text(json.dumps({'task_id':tid,'repo':repo,'priority':'P1','readiness':'ready','assigned_to':'claude','assigned_at':now.strftime('%Y-%m-%dT%H:%M:%SZ'),'expires_at':(now+datetime.timedelta(hours=48)).strftime('%Y-%m-%dT%H:%M:%SZ')},indent=2))
+    found=False
+    for m in ledger['modules']:
+        if m.get('module_id')==f'mon-{domain_key}': m['tasks'].append({'task_id':tid,'repo':repo,'status':'ready','priority':'P1','task_doc':f'docs/development/tasks/{tid}.md'}); found=True; break
+    if not found: ledger['modules'].append({'module_id':f'mon-{domain_key}','overall_status':'partial','tasks':[{'task_id':tid,'repo':repo,'status':'ready','priority':'P1','task_doc':f'docs/development/tasks/{tid}.md'}]})
+    created+=1; print(f'  [Monitor] Created: {tid}')
+    if created>=5: break
+(docs/'docs/development/task-state-ledger.json').write_text(json.dumps(ledger,indent=2,ensure_ascii=False))
+print(f'  [Monitor] Total created: {created} tasks')
+" 2>/dev/null || true
+    fi
+  fi
 }

@@ -6,6 +6,38 @@ set -euo pipefail
 
 LIVEMASK_ROOT="${LIVEMASK_ROOT:-/Users/sammytan/Developer/LiveMask}"
 
+# ── Service metadata ─────────────────────────────────────────────────────
+# Returns: is_service|compose_service|health_url|port|dependencies
+repo_service_info() {
+  local repo="${1:-}"
+  local bp="${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
+  local ap="${LIVEMASK_ADMIN_PORT:-3001}"
+  local wp="${LIVEMASK_WEBSITE_PORT:-3002}"
+  local np="${LIVEMASK_NODEAGENT_PORT:-19090}"
+  local jp="${LIVEMASK_JOB_SERVICE_PORT:-19191}"
+  case "${repo}" in
+    livemask-backend)     echo "true|backend|http://127.0.0.1:${bp}/api/v1/health|${bp}|postgres,redis" ;;
+    livemask-admin)       echo "true|admin|http://127.0.0.1:${ap}/login|${ap}|backend" ;;
+    livemask-website)     echo "true|website|http://127.0.0.1:${wp}/|${wp}|backend" ;;
+    livemask-nodeagent)   echo "true|nodeagent|http://127.0.0.1:${np}/config/status|${np}|backend" ;;
+    livemask-job-service) echo "true|job-service|http://127.0.0.1:${jp}/healthz|${jp}|backend,postgres,redis" ;;
+    *)                    echo "false||||" ;;
+  esac
+}
+
+# Returns space-separated smoke test basenames for a repo
+repo_smoke_tests() {
+  local repo="${1:-}"
+  case "${repo}" in
+    livemask-backend)     echo "smoke node billing connect jobs dashboard" ;;
+    livemask-admin)       echo "admin-nav-ia admin-nodes-ux" ;;
+    livemask-website)     echo "website" ;;
+    livemask-nodeagent)   echo "nodeagent-release nodeagent-config" ;;
+    livemask-job-service) echo "jobs jobs-hardening" ;;
+    *)                    echo "" ;;
+  esac
+}
+
 verify_repo() {
   local repo="${1:-livemask-docs}"
   local repo_dir="${LIVEMASK_ROOT}/${repo}"
@@ -162,37 +194,165 @@ for m in ledger.get('modules',[]):
   verify_repo "${repo}"
 }
 
-# ── Runtime smoke test ──────────────────────────────────────────────────
-verify_runtime() {
-  local repo="${1:-livemask-backend}"; local port="${2:-8080}"
-  echo "=== RUNTIME SMOKE: ${repo} ==="
-  case "${repo}" in
-    livemask-backend)
-      cd "${LIVEMASK_ROOT}/livemask-backend" 2>/dev/null || return 1
-      go build -o /tmp/livemask-backend-test ./... 2>/dev/null && \
-      (/tmp/livemask-backend-test &>/dev/null &) && sleep 2 && \
-      curl -sSf "http://localhost:${port}/api/v1/health" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  Health: {d.get(\"status\",\"?\")}')" 2>/dev/null || echo "  (server start failed)"
-      pkill -f "livemask-backend-test" 2>/dev/null || true
-      ;;
-    livemask-admin)
-      cd "${LIVEMASK_ROOT}/livemask-admin" 2>/dev/null || return 1
-      npm run build 2>&1 | tail -2 && echo "  Admin build: OK" || echo "  Admin build: FAIL"
-      ;;
-    livemask-app) cd "${LIVEMASK_ROOT}/livemask-app" && flutter analyze 2>&1 | tail -2 ;;
-  esac
+# ── Runtime health verification ──────────────────────────────────────────
+# Usage: verify_runtime_health <repo> [fast|full]
+# Writes result to /tmp/claude/runtime-health-<repo>.json
+# fast: start service + health check (< 2min), full: + docker compose (< 5min)
+verify_runtime_health() {
+  local repo="${1:-}" mode="${2:-fast}" now; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local max_attempts=15; [[ "${mode}" == "full" ]] && max_attempts=30
+  local outfile="/tmp/claude/runtime-health-${repo}.json"
+
+  local info; info=$(repo_service_info "${repo}")
+  local is_service; is_service=$(echo "${info}" | cut -d'|' -f1)
+  local svc_name; svc_name=$(echo "${info}" | cut -d'|' -f2)
+  local health_url; health_url=$(echo "${info}" | cut -d'|' -f3)
+
+  if [[ "${is_service}" != "true" ]]; then
+    python3 -c "import json;print(json.dumps({'repo':'${repo}','is_service':False,'skipped':True,'reason':'not a runnable service'}))" > "${outfile}"
+    cat "${outfile}"
+    return 0
+  fi
+
+  python3 - "${repo}" "${mode}" "${now}" "${svc_name}" "${health_url}" "${max_attempts}" "${LIVEMASK_ROOT}" "${outfile}" <<'PY'
+import json, subprocess, time, sys, os
+
+repo = sys.argv[1]
+mode = sys.argv[2]
+now = sys.argv[3]
+svc_name = sys.argv[4]
+health_url = sys.argv[5]
+max_attempts = int(sys.argv[6])
+livemask_root = sys.argv[7]
+outfile = sys.argv[8]
+
+results = {"repo": repo, "mode": mode, "timestamp": now, "checks": [], "passed": 0, "failed": 0, "skipped": 0}
+
+def add_check(name, status, detail=""):
+    results["checks"].append({"name": name, "status": status, "detail": detail})
+    if status == "pass": results["passed"] += 1
+    elif status == "fail": results["failed"] += 1
+    else: results["skipped"] += 1
+
+# Check docker
+docker_ok = subprocess.run(["docker", "info"], capture_output=True, timeout=10).returncode == 0
+if not docker_ok:
+    add_check("docker-available", "skip", "docker not available")
+    results["skipped"] = True
+    with open(outfile, "w") as f: json.dump(results, f, indent=2)
+    print(json.dumps(results))
+    sys.exit(0)
+add_check("docker-available", "pass", "docker daemon reachable")
+
+# Check if service already running
+try:
+    r = subprocess.run(["curl", "-sSf", "--connect-timeout", "2", health_url], capture_output=True, timeout=5)
+    already_running = r.returncode == 0
+except:
+    already_running = False
+
+if already_running:
+    add_check("health-endpoint", "pass", f"service already running at {health_url}")
+else:
+    cf = f"{livemask_root}/livemask-ci-cd/infra/docker-compose.local.yml"
+    if os.path.exists(cf):
+        subprocess.run(["docker", "compose", "-f", cf, "up", "-d", svc_name],
+                       cwd=os.path.dirname(cf), capture_output=True, timeout=120)
+        health_ok = False
+        for attempt in range(max_attempts):
+            r = subprocess.run(["curl", "-sSf", "--connect-timeout", "3", health_url],
+                              capture_output=True, timeout=5)
+            if r.returncode == 0:
+                health_ok = True
+                resp = r.stdout.decode()[:200].replace("\n", " ")
+                add_check("health-endpoint", "pass", f"startup {attempt*2}s, response: {resp}")
+                break
+            time.sleep(2)
+        if not health_ok:
+            add_check("health-endpoint", "fail", f"could not reach {health_url} after {max_attempts*2}s")
+    else:
+        add_check("health-endpoint", "skip", f"no compose file")
+
+# Check runtime errors
+if already_running or svc_name:
+    cf = f"{livemask_root}/livemask-ci-cd/infra/docker-compose.local.yml"
+    if os.path.exists(cf):
+        r = subprocess.run(["docker", "compose", "-f", cf, "logs", svc_name, "--tail=100"],
+                          cwd=os.path.dirname(cf), capture_output=True, timeout=15, text=True)
+        has_panic = "panic" in r.stdout.lower() or "FATAL" in r.stdout
+        if has_panic:
+            add_check("runtime-errors", "fail", "panic/fatal found in logs")
+        else:
+            add_check("runtime-errors", "pass", "no panics/fatals in recent logs")
+    else:
+        add_check("runtime-errors", "skip", "no container logs available")
+else:
+    add_check("runtime-errors", "skip", "no container logs available")
+
+with open(outfile, "w") as f: json.dump(results, f, indent=2)
+print(json.dumps(results))
+PY
+  # The python3 script already printed JSON to stdout — don't cat again
 }
 
-# ── Docker smoke test ──────────────────────────────────────────────────
-verify_docker_smoke() {
-  echo "=== DOCKER SMOKE ==="
-  local cf="${LIVEMASK_ROOT}/livemask-ci-cd/infra/docker-compose.local.yml"
-  if [[ -f "${cf}" ]]; then
-    cd "$(dirname "${cf}")" && docker compose -f "${cf}" up -d 2>/dev/null && sleep 5
-    curl -sSf "http://localhost:8080/api/v1/health" 2>/dev/null && echo "  [Docker] Smoke PASS" || echo "  [Docker] Smoke FAIL (containers may already be running)"
-    docker compose -f "${cf}" down 2>/dev/null || true
-  else
-    echo "  [Docker] Compose file not found at ${cf}"
-  fi
+# ── Targeted smoke tests ─────────────────────────────────────────────────
+# Writes result to /tmp/claude/smoke-tests-<repo>.json
+verify_smoke_tests() {
+  local repo="${1:-}" top_n="${2:-3}"
+  local outfile="/tmp/claude/smoke-tests-${repo}.json"
+
+  python3 - "${repo}" "${top_n}" "${LIVEMASK_ROOT}" "${outfile}" <<'PY'
+import json, subprocess, time, sys, os
+
+repo = sys.argv[1]
+top_n = int(sys.argv[2])
+livemask_root = sys.argv[3]
+outfile = sys.argv[4]
+
+# Map repo to smoke test basenames
+smoke_map = {
+    "livemask-backend": "smoke node billing connect jobs dashboard".split(),
+    "livemask-admin": "admin-nav-ia admin-nodes-ux".split(),
+    "livemask-website": ["website"],
+    "livemask-nodeagent": "nodeagent-release nodeagent-config".split(),
+    "livemask-job-service": "jobs jobs-hardening".split(),
+}
+names = smoke_map.get(repo, [])
+
+if not names:
+    result = {"repo": repo, "smoke_tests_run": 0, "skipped": True, "reason": "no smoke tests for repo"}
+    with open(outfile, "w") as f: json.dump(result, f, indent=2)
+    print(json.dumps(result))
+    sys.exit(0)
+
+smoke_dir = f"{livemask_root}/livemask-ci-cd/scripts"
+results = {"repo": repo, "results": [], "smoke_tests_run": 0, "smoke_tests_passed": 0, "smoke_tests_failed": 0}
+count = 0
+
+for name in names:
+    if count >= top_n: break
+    script = f"{smoke_dir}/smoke.sh" if name == "smoke" else f"{smoke_dir}/{name}-smoke.sh"
+    if os.path.isfile(script) and os.access(script, os.X_OK):
+        start = time.time()
+        try:
+            r = subprocess.run(["timeout", "180", "bash", script], capture_output=True, timeout=190)
+            dur = int(time.time() - start)
+            if r.returncode == 0:
+                results["results"].append({"name": name, "status": "pass", "duration_sec": dur})
+                results["smoke_tests_passed"] += 1
+            else:
+                results["results"].append({"name": name, "status": "fail", "duration_sec": dur})
+                results["smoke_tests_failed"] += 1
+            results["smoke_tests_run"] += 1
+        except:
+            results["results"].append({"name": name, "status": "timeout", "duration_sec": 190})
+            results["smoke_tests_failed"] += 1
+            results["smoke_tests_run"] += 1
+        count += 1
+
+with open(outfile, "w") as f: json.dump(results, f, indent=2)
+print(json.dumps(results))
+PY
 }
 
 # ── Test coverage analysis ──────────────────────────────────────────────

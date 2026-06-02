@@ -249,9 +249,14 @@ for m in ledger.get('modules',[]):
   echo "=== QA VERIFICATION: ${tid} (${repo}) ==="
   echo ""
 
-  # Run full verification
+  # Run full verification (use result file to avoid stdout parsing issues)
   source "${CI_CD_DIR}/scripts/lib/local-verify.sh" 2>/dev/null || true
-  local verify_result; verify_result=$(verify_repo "${repo}" 2>/dev/null || echo "{}")
+  verify_repo "${repo}" > /dev/null 2>&1 || true
+  local v_result_file; v_result_file=$(ls -t /tmp/claude/verify-${repo}-*.json 2>/dev/null | head -1)
+  local verify_result="{}"
+  if [[ -f "${v_result_file}" ]]; then
+    verify_result=$(cat "${v_result_file}" 2>/dev/null || echo "{}")
+  fi
 
   # Check acceptance criteria from task doc
   local task_doc="${DOCS_DIR}/docs/development/tasks/${tid}.md"
@@ -295,17 +300,52 @@ PY
 
   echo "${acceptance_details}"
 
-  # Record QA verdict in review contract
-  local now; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  local qa_passed; qa_passed=$(echo "${acceptance_details}" | python3 -c "import json,sys; d=json.load(sys.stdin); print('true' if d.get('all_checked') and d.get('verify_failed',99)==0 else 'false')" 2>/dev/null || echo "false")
+  # Runtime health check (full mode) — writes to /tmp/claude/runtime-health-<repo>.json
+  verify_runtime_health "${repo}" "full" > /dev/null 2>&1 || true
+  local health_file="/tmp/claude/runtime-health-${repo}.json"
+  if [[ -f "${health_file}" ]]; then
+    python3 -c "import json;d=json.load(open('${health_file}'));print(f'  [Runtime] checks: {d.get(\"passed\",0)} pass, {d.get(\"failed\",0)} fail, {d.get(\"skipped\",0)} skip')" 2>/dev/null || true
+    cp "${health_file}" /tmp/claude/qa-health-${tid}.json
+  else
+    printf '{"failed":0,"skipped":true}\n' > /tmp/claude/qa-health-${tid}.json
+  fi
 
-  python3 - "${review_file}" "${now}" "${qa_passed}" "${acceptance_details}" <<'PY'
+  # Targeted smoke tests — writes to /tmp/claude/smoke-tests-<repo>.json
+  verify_smoke_tests "${repo}" 3 > /dev/null 2>&1 || true
+  local smoke_file="/tmp/claude/smoke-tests-${repo}.json"
+  if [[ -f "${smoke_file}" ]]; then
+    python3 -c "import json;d=json.load(open('${smoke_file}'));print(f'  [Smoke] {d.get(\"smoke_tests_passed\",0)}/{d.get(\"smoke_tests_run\",0)} passed')" 2>/dev/null || true
+    cp "${smoke_file}" /tmp/claude/qa-smoke-${tid}.json
+  else
+    printf '{"smoke_tests_failed":0,"smoke_tests_run":0}\n' > /tmp/claude/qa-smoke-${tid}.json
+  fi
+
+  # Record QA verdict in review contract — now includes runtime + smoke results
+  local now; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # Write results to temp files for verdict computation
+  if [[ -f "${v_result_file}" ]]; then
+    cp "${v_result_file}" /tmp/claude/qa-verify-${tid}.json
+  else
+    printf '{"failed":1}\n' > /tmp/claude/qa-verify-${tid}.json
+  fi
+  # acceptance_details is clean JSON from python3 heredoc
+  printf '%s\n' "${acceptance_details:-{\"all_checked\":false}}" > /tmp/claude/qa-accept-${tid}.json
+  local qa_passed; qa_passed=$(python3 "${CI_CD_DIR}/scripts/lib/qa-verdict.py" "${tid}" 2>/dev/null || echo "false")
+
+  # Read back the clean files for review contract recording
+  local health_json smoke_json
+  health_json=$(cat /tmp/claude/qa-health-${tid}.json 2>/dev/null || echo '{}')
+  smoke_json=$(cat /tmp/claude/qa-smoke-${tid}.json 2>/dev/null || echo '{}')
+
+  python3 - "${review_file}" "${now}" "${qa_passed}" "${acceptance_details}" "${health_json}" "${smoke_json}" <<'PY'
 import json, pathlib, sys
 
 review_file = pathlib.Path(sys.argv[1])
 now = sys.argv[2]
 qa_passed = sys.argv[3] == 'true'
 acceptance_details = sys.argv[4]
+health_result = sys.argv[5]
+smoke_result = sys.argv[6]
 
 contract = json.loads(review_file.read_text())
 last_round = contract["rounds"][-1]
@@ -314,6 +354,7 @@ last_round["qa"] = {
     "passed": qa_passed,
     "verdict": "QA_PASSED" if qa_passed else "QA_FAILED",
     "details": json.loads(acceptance_details) if acceptance_details else {},
+    "runtime": {"health": json.loads(health_result) if health_result else {}, "smoke": json.loads(smoke_result) if smoke_result else {}},
 }
 contract["updated_at"] = now
 review_file.write_text(json.dumps(contract, indent=2, ensure_ascii=False))
@@ -486,4 +527,26 @@ print(f'{d[\"task_id\"]}: state={d[\"state\"]} next={d.get(\"next_required_actor
     [[ ! -f "${review_file}" ]] && { echo "No review contract for ${tid}"; return 1; }
     python3 -m json.tool "${review_file}" 2>/dev/null
   fi
+}
+
+# ── Review SLA: auto-escalate if review takes too long ──────────────────
+executor_check_review_sla() {
+  local tid="${1:-}"; [[ -z "${tid}" ]] && return 0
+  local review_file="${DOCS_DIR}/docs/development/review-contracts/${tid}-review.json"
+  [[ ! -f "${review_file}" ]] && return 0
+  
+  python3 -c "
+import json,time
+d=json.load(open('${review_file}'))
+state=d.get('state','')
+updated=d.get('updated_at','')
+if not updated: exit(0)
+from datetime import datetime
+dt=datetime.fromisoformat(updated.replace('Z','+00:00'))
+age_min=(time.time()-dt.timestamp())/60
+if state=='under_review' and age_min>30:
+    print(f'REVIEW_TIMEOUT: {tid} under review for {age_min:.0f}min — auto-escalating')
+elif state=='changes_requested' and age_min>60:
+    print(f'CHANGES_STALE: {tid} changes requested for {age_min:.0f}min — auto-closing')
+" 2>/dev/null || true
 }

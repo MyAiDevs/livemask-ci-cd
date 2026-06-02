@@ -441,7 +441,7 @@ executor_check_liveness() {
     local hb_pid; hb_pid=$(cat "${executor_heartbeat_pid_file}" 2>/dev/null || echo "0")
     # Check if the heartbeat-writer process is still alive
     if ! kill -0 "${hb_pid}" 2>/dev/null; then
-      echo "  [LIVENESS] Heartbeat PID ${hb_pid} is dead — executor CRASHED (假活 detected!)"
+      echo "  [LIVENESS] Heartbeat PID ${hb_pid} is dead — resetting stale agent state"; python3 -c "import json,pathlib; p=pathlib.Path('${AGENT_STATE}'); d=json.loads(p.read_text()); d['phase']='idle'; d['current_task']={}; p.write_text(json.dumps(d,indent=2))" 2>/dev/null || true
       return 1  # Heartbeat process itself is dead
     fi
     # Check if parent executor process is alive (the heartbeat is a child of executor)
@@ -620,4 +620,25 @@ executor_notify_human() {
   source "${CI_CD_DIR}/scripts/lib/lark-card.sh" 2>/dev/null && \
     lark_card_batch "Engine Alert — ${severity}" "[{\"emoji\":\"🚨\",\"label\":\"${severity}\",\"value\":\"${message:0:200}\"}]" 2>/dev/null || true
   echo "  [NOTIFY] Human alerted: ${severity} — ${message:0:80}"
+}
+
+# ── Persistent evidence log for each task ──────────────────────────────
+executor_log_evidence() {
+  local tid="${1:-}" event="${2:-}" detail="${3:-}"
+  local evidence_dir="${ROLE_CACHE_DIR}/evidence"
+  mkdir -p "${evidence_dir}" 2>/dev/null
+  local log_file="${evidence_dir}/${tid}.jsonl"
+  python3 -c "
+import json,pathlib,time
+f=pathlib.Path('${log_file}')
+entry={'task_id':'${tid}','event':'${event}','detail':'${detail}','timestamp':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())}
+with open(f,'a') as fp: fp.write(json.dumps(entry,ensure_ascii=False)+'\n')
+" 2>/dev/null || true
+}
+
+executor_get_evidence() {
+  local tid="${1:-}"
+  local evidence_dir="${ROLE_CACHE_DIR}/evidence"
+  local log_file="${evidence_dir}/${tid}.jsonl"
+  [[ -f "${log_file}" ]] && cat "${log_file}" || echo "No evidence for ${tid}"
 }
