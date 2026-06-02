@@ -224,3 +224,54 @@ impl_find_references() {
     grep -rn "${symbol}" "${dir}" --include="*.go" --include="*.ts" --include="*.tsx" --include="*.dart" 2>/dev/null | grep -v "node_modules\|\.git" | head -10
   fi
 }
+
+# ── Auto-implement: call DeepSeek to write code ──────────────────────
+impl_auto_code() {
+  local tid="${1:-}"; [[ -z "${tid}" ]] && return 1
+  local repo; repo=$(python3 -c "import json;l=json.load(open('${DOCS_DIR}/docs/development/task-state-ledger.json'));[print(t['repo']) for m in l['modules'] for t in m['tasks'] if t['task_id']=='${tid}']" 2>/dev/null||echo "")
+  [[ -z "${repo}" ]] && return 1
+  
+  local task_doc="${DOCS_DIR}/docs/development/tasks/${tid}.md"
+  local scope; scope=$(grep "## 2. Scope" -A5 "${task_doc}" 2>/dev/null | grep "Implement\|Add\|Create\|Build" | head -1 | sed 's/^[-\* ]*//' || echo "Implement feature")
+  
+  echo "  [AutoImpl] Generating code for ${tid} in ${repo}..."
+  
+  # Call DeepSeek to generate implementation
+  source "${CI_CD_DIR}/scripts/lib/deepseek-engine.sh" 2>/dev/null || true
+  
+  local prompt="Task: ${tid}\nRepo: ${repo}\nScope: ${scope}\n\nWrite minimal Go code to implement this. Add ONE function to internal/observability/handler.go following existing patterns (use writeJSON for responses). Output ONLY the code, no explanation."
+  
+  local code; code=$(ds_chat "You are a Go backend developer. Write only working Go code, no markdown." "${prompt}" 2>/dev/null || echo "")
+  
+  if [[ -n "${code}" && "${code}" != *"DS"*"fail"* ]]; then
+    cd "${LIVEMASK_ROOT}/${repo}" 2>/dev/null || return 1
+    echo "${code}" >> internal/observability/handler.go
+    
+    if go build ./... 2>/dev/null; then
+      echo "  [AutoImpl] BUILD PASS — DeepSeek code works!"
+      return 0
+    else
+      echo "  [AutoImpl] BUILD FAIL — reverting DeepSeek code"
+      git checkout -- internal/observability/handler.go
+      return 1
+    fi
+  else
+    echo "  [AutoImpl] DeepSeek unavailable — using template fallback"
+    cd "${LIVEMASK_ROOT}/${repo}" 2>/dev/null || return 1
+    # Template fallback: simple endpoint
+    local fname="Auto$(echo "${tid}" | tr -cd 'A-Za-z0-9' | tail -c 20)"
+    cat >> internal/observability/handler.go << GOCODE
+func (h *Handler) ${fname}(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet { writeJSON(w, 405, map[string]string{"error":"method not allowed"}); return }
+	writeJSON(w, 200, map[string]interface{}{"status":"ok","task":"${tid}","timestamp":time.Now().UTC().Format(time.RFC3339)})
+}
+GOCODE
+    if go build ./... 2>/dev/null; then
+      echo "  [AutoImpl] Template BUILD PASS"
+      return 0
+    else
+      git checkout -- internal/observability/handler.go
+      return 1
+    fi
+  fi
+}

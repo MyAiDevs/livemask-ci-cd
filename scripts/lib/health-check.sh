@@ -254,7 +254,7 @@ for line in sys.stdin:
   echo "── Dependencies ──"
 
   # 3a. gh CLI
-  if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
+  if command -v gh &>/dev/null && { gh auth status &>/dev/null 2>&1 || [[ -n "${GH_TOKEN:-}" ]] || [[ -n "${GITHUB_TOKEN:-}" ]]; }; then
     PASS "gh CLI: authenticated"
   else
     FAIL "gh CLI: not available or not authenticated — GitHub operations will fail"

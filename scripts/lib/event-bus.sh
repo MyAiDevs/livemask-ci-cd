@@ -58,6 +58,7 @@ state_path.write_text(json.dumps(state,indent=2,ensure_ascii=False))
   case "${event_type}" in
     task_accepted)
       (event_react_pm_task_accepted "${task_id}" 2>/dev/null || true) &
+      executor_log_evidence "${task_id}" "accepted" "Task accepted by daemon" 2>/dev/null || true
       (event_react_product_progress "${task_id}" 2>/dev/null || true) & ;;
     code_committed)
       (event_react_tech_commit_check "${task_id}" 2>/dev/null || true) &
@@ -94,14 +95,18 @@ state_path.write_text(json.dumps(state,indent=2,ensure_ascii=False))
       ;;
     task_completed)
       # Trigger TaskReview audit immediately on task completion
-      bash "${CI_CD_DIR}/scripts/claude-loop-role-engine.sh" task-review 2>/dev/null &
+      (sleep 30 && bash "${CI_CD_DIR}/scripts/claude-loop-role-engine.sh" task-review 2>/dev/null) &  # Delayed to avoid PM lease race
       skill_update_config 2>/dev/null || true  # Sync rules after task completion
       event_react_pm_cycle_close "${task_id}" 2>/dev/null || true
       (event_react_product_progress "${task_id}" 2>/dev/null || true) &
       monitor_analyze_event "task_completed" "${task_id}" 2>/dev/null || true
       python3 -c "import json,pathlib; p=pathlib.Path('${HOME}/.claude/role-cache/pm-lease.json');
 if p.exists(): d=json.loads(p.read_text()); d['phase']='complete'; d['completed_at']='$(date -u +%Y-%m-%dT%H:%M:%SZ)'; p.write_text(json.dumps(d,indent=2))" 2>/dev/null || true
-      echo "  [EVENT] Task completed — PM lease released" ;;
+      echo "  [EVENT] Task completed — PM lease released"
+      # Remove dispatch packet so daemon does not re-accept
+      rm -f "${DOCS_DIR}/docs/development/dispatch-packets/${task_id}.json" 2>/dev/null || true
+      python3 /tmp/reset_agent.py 2>/dev/null || true
+      ;;
     task_blocked)
       event_react_pm_diagnose_blocker "${task_id}" 2>/dev/null || true ;;
   esac
@@ -202,7 +207,11 @@ event_react_leader_review() {
   source "${CI_CD_DIR}/scripts/lib/executor-guard.sh" 2>/dev/null || true
   # FIX 4: Use executor_auto_review which handles docs-only changes + atomicity
   executor_auto_review "${tid}" 2>/dev/null || echo "  [Leader] Auto-review skipped"
-  # FIX 9: Push active alert
+  # DeepSeek: deep code review with thinking mode for complex diffs
+  local diff; diff=$(git -C "${LIVEMASK_ROOT}/${repo}" diff origin/dev...HEAD 2>/dev/null | head -100 || echo "")
+  if [[ -n "${diff}" && -n "${DEEPSEEK_API_KEY:-}" ]]; then
+    ds_leader_review "${diff}" "${tid}" 2>/dev/null | tail -20 &
+  fi
   executor_push_alert "review" "Leader auto-reviewed ${tid}" 2>/dev/null || true
 }
 
@@ -282,7 +291,47 @@ executor_notify() {
   local action="${1:-}" task_id="${2:-}" metadata="${3:-{}}"
   case "${action}" in
     accept)   event_emit "task_accepted" "${task_id}" "${metadata}" ;;
-    commit)   event_emit "code_committed" "${task_id}" "${metadata}" ;;
+    commit)
+      # Blocking pre-commit self-test — must pass before code_committed fires
+      local repo; repo=$(python3 -c "
+import json
+l=json.load(open('${DOCS_DIR}/docs/development/task-state-ledger.json'))
+for m in l.get('modules',[]):
+    for t in m.get('tasks',[]):
+        if t.get('task_id')=='${task_id}':
+            print(t.get('repo',''))
+            break
+" 2>/dev/null || echo "")
+      if [[ -n "${repo}" ]]; then
+        source "${CI_CD_DIR}/scripts/lib/local-verify.sh" 2>/dev/null || true
+        verify_repo "${repo}" > /dev/null 2>&1 || true
+        local v_result_file; v_result_file=$(ls -t /tmp/claude/verify-${repo}-*.json 2>/dev/null | head -1)
+        local v_fail=0
+        if [[ -f "${v_result_file}" ]]; then
+          v_fail=$(python3 -c "import json;d=json.load(open('${v_result_file}'));print(d.get('failed',1))" 2>/dev/null || echo "1")
+        fi
+        if [[ "${v_fail}" -gt 0 ]]; then
+          echo "  [PRE-COMMIT] BLOCKED: verify_repo for ${repo} has ${v_fail} failures"
+          python3 -c "import json;d=json.load(open('${v_result_file}'));[print(f'    FAIL: {c[\"name\"]}') for c in d.get('checks',[]) if c.get('status')=='fail']" 2>/dev/null
+          return 1
+        fi
+        echo "  [PRE-COMMIT] verify_repo PASSED for ${repo}"
+        # Fast runtime health check
+        local h_result; h_result=$(verify_runtime_health "${repo}" "fast" 2>/dev/null || echo '{"failed":1}')
+        local h_skip; h_skip=$(echo "${h_result}" | python3 -c "import json,sys;d=json.load(sys.stdin);print('true' if d.get('skipped') or d.get('is_service')==False else 'false')" 2>/dev/null || echo "false")
+        if [[ "${h_skip}" == "true" ]]; then
+          echo "  [PRE-COMMIT] runtime check skipped (not a service or docker unavailable)"
+        else
+          local h_fail; h_fail=$(echo "${h_result}" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d.get('failed',1))" 2>/dev/null || echo "1")
+          if [[ "${h_fail}" -gt 0 ]]; then
+            echo "  [PRE-COMMIT] BLOCKED: runtime health check for ${repo} failed"
+            echo "${h_result}" | python3 -c "import json,sys;d=json.load(sys.stdin);[print(f'    {c[\"status\"].upper()}: {c[\"name\"]} — {c.get(\"detail\",\"\")}') for c in d.get('checks',[])]" 2>/dev/null
+            return 1
+          fi
+          echo "  [PRE-COMMIT] runtime health PASSED for ${repo}"
+        fi
+      fi
+      event_emit "code_committed" "${task_id}" "${metadata}" ;;
     submit)   event_emit "review_submitted" "${task_id}" "${metadata}" ;;
     qa_pass)  event_emit "qa_passed" "${task_id}" "${metadata}" ;;
     qa_fail)  event_emit "qa_failed" "${task_id}" "${metadata}" ;;

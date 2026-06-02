@@ -104,3 +104,42 @@ lark_query_submit_doc() {
   local u; u=$(gh issue create --repo "MyAiDevs/livemask-docs" --title "文档: ${t:0:80}" --body "Lark 提交\n\n${t}" --label "documentation" 2>/dev/null||echo "")
   if [[ -n "${u}" ]]; then lark_send "📝 文档已创建" "blue" $'**'"${t:0:100}"$'**\n\n✅ GitHub Issue 已创建\n'"${u}"; else lark_send "📝 文档已记录" "blue" $'**'"${t:0:100}"$'**\n\n(离线模式)'; fi
 }
+
+# ── Retry queue for failed Lark sends ───────────────────────────────────
+LARK_RETRY_QUEUE="${ROLE_CACHE_DIR:-${HOME}/.claude/role-cache}/lark-retry.jsonl"
+lark_send_with_retry() {
+  local title="$1" color="$2" body="$3" max_retries="${4:-3}"
+  if python3 "${SEND_PY}" "${title}" "${color}" "${body}" 2>/dev/null; then
+    return 0
+  fi
+  # Queue for retry
+  mkdir -p "$(dirname "${LARK_RETRY_QUEUE}")" 2>/dev/null
+  python3 -c "
+import json,pathlib
+f=pathlib.Path('${LARK_RETRY_QUEUE}')
+f.parent.mkdir(parents=True,exist_ok=True)
+with open(f,'a') as fp: fp.write(json.dumps({'title':'${title}','color':'${color}','body':'${body}','retries':0,'max':${max_retries},'at':'$(date -u +%Y-%m-%dT%H:%M:%SZ)'},ensure_ascii=False)+'\n')
+" 2>/dev/null || true
+}
+
+lark_flush_retry_queue() {
+  [[ ! -f "${LARK_RETRY_QUEUE}" ]] && return
+  local flushed=0
+  while IFS= read -r line; do
+    [[ -z "${line}" ]] && continue
+    local title color body retries mx
+    read -r title color body retries mx <<< "$(python3 -c "
+import json,sys; d=json.loads(sys.stdin.readline())
+print(d['title'],d['color'],d['body'],d['retries'],d['max'])
+" <<< "${line}" 2>/dev/null || echo '')"
+    [[ -z "${title}" ]] && continue
+    if [[ "${retries}" -ge "${mx}" ]]; then flushed=$((flushed+1)); continue; fi
+    if python3 "${SEND_PY}" "${title}" "${color}" "${body}" 2>/dev/null; then
+      flushed=$((flushed+1))
+    else
+      python3 -c "import json,pathlib; d=json.loads(sys.stdin.readline()); d['retries']+=1; print(json.dumps(d))" <<< "${line}" >> "${LARK_RETRY_QUEUE}.tmp" 2>/dev/null || true
+    fi
+  done < "${LARK_RETRY_QUEUE}"
+  mv "${LARK_RETRY_QUEUE}.tmp" "${LARK_RETRY_QUEUE}" 2>/dev/null || true
+  [[ "${flushed}" -gt 0 ]] && echo "  [Lark] Flushed ${flushed} queued notifications"
+}

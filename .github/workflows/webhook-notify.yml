@@ -11,7 +11,12 @@ jobs:
     steps:
       - name: Send webhook
         run: |
-          curl -sS -X POST "${{ secrets.WEBHOOK_URL }}/github" \
+          WEBHOOK_URL="${{ secrets.WEBHOOK_URL }}"
+          if [[ -z "${WEBHOOK_URL}" ]]; then
+            echo "SKIP: WEBHOOK_URL secret not configured — notification skipped"
+            exit 0
+          fi
+          curl -sS -X POST "${WEBHOOK_URL}/github" \
             -H "Content-Type: application/json" \
             -H "X-Webhook-Token: ${{ secrets.WEBHOOK_TOKEN }}" \
             -d "$(cat <<EVENT
@@ -27,4 +32,4 @@ jobs:
             }
           }
           EVENT
-          )"
+          )" || echo "WARN: webhook delivery failed (non-blocking)"
