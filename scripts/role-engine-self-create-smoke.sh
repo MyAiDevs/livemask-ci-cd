@@ -54,6 +54,10 @@ require_present "issue URL guard remains enforced" "missing GitHub issue URL aft
 require_present "auto task ledger module reopens when ready task is added" "module\\['overall_status'\\] = 'partial'"
 require_present "failed docs landing removes generated task doc" 'rm -f "${task_doc}" "${dp_file}"'
 require_present "docs auto-create refreshes dev before merge" "git pull --ff-only origin dev"
+require_present "role cache write failure falls back to tmp cache" 'ROLE_CACHE_DIR="/tmp/claude/role-cache"'
+require_present "self-create writes machine-readable status" "write_self_create_status()"
+require_present "self-create skipped reason is persisted" "no safe self-create source passed all guards"
+require_present "self-create status includes coordination decision" "coordination_decision"
 
 require_absent "old PM-3 no-auto-create instruction removed" "report Ready contract gaps for triage; do NOT auto-create"
 require_absent "old PM-3 NOT auto-creating banner removed" "NOT auto-creating"
