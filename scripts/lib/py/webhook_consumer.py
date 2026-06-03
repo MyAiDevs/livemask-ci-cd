@@ -119,16 +119,28 @@ def cmd_daemon():
     w.watch(os.path.abspath(__file__))
     w.watch_dir(os.path.dirname(__file__))  # scripts/lib/py/
     w.watch_dir(os.path.dirname(os.path.dirname(__file__)))  # scripts/lib/
-    print(f"[consumer] daemon start — poll {INBOX_FILE}, auto-reload every 60s", flush=True)
+    # Non-blocking reload check
+    def _should_reload() -> bool:
+        if w._reload_requested:
+            return True
+        for path, old_mtime in list(w._files.items()):
+            try:
+                if os.path.getmtime(path) != old_mtime:
+                    return True
+            except OSError:
+                pass
+        return False
+    _reload_counter = 0
+    print(f"[consumer] daemon start — poll {INBOX_FILE}, check reload every ~60s", flush=True)
     while True:
-        if w.changed():
-            w.restart()
+        _reload_counter += 1
+        if _reload_counter >= 12:
+            _reload_counter = 0
+            if _should_reload():
+                w.restart()
         try: cmd_process()
         except Exception as e: print(f"[consumer] daemon error: {e}", flush=True)
-        for _ in range(12):
-            if w.changed():
-                w.restart()
-            time.sleep(5)
+        time.sleep(5)
 
 
 def cmd_status():
