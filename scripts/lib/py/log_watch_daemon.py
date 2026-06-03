@@ -74,6 +74,113 @@ def _fix_counter_check() -> bool:
     return True
 
 
+SESSION_STATE = os.path.join(CACHE_DIR, "role-cache", "session-state.json")
+
+
+def _session_phase() -> str:
+    """Read current session phase."""
+    try:
+        with open(SESSION_STATE) as f:
+            d = json.load(f)
+        return d.get("phase", "")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return ""
+
+
+def _session_task_id() -> str:
+    """Read current session task_id."""
+    try:
+        with open(SESSION_STATE) as f:
+            d = json.load(f)
+        return d.get("task_id", "")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return ""
+
+
+def _resolve_stuck_phase4():
+    """Auto-resolve Phase 4 stuck state by detecting and acting on the task."""
+    phase = _session_phase()
+    task_id = _session_task_id()
+
+    if not task_id:
+        print(f"[log-watch][phase4] no task_id in session state", flush=True)
+        return False
+
+    if phase not in ("implementing", "context_loaded"):
+        print(f"[log-watch][phase4] session phase={phase} not stuck", flush=True)
+        return False
+
+    print(f"[log-watch][phase4] detected stuck task: {task_id} (phase={phase})", flush=True)
+
+    auto_impl_py = os.path.join(PY_DIR, "auto_implement.py")
+    if not os.path.exists(auto_impl_py):
+        print(f"[log-watch][phase4] auto_implement.py not found, checking if already completed in ledger...", flush=True)
+
+        # Fallback: check ledger for completed status
+        ledger_path = os.path.join(
+            os.environ.get("LIVEMASK_ROOT", os.path.expanduser("~/Developer/LiveMask")),
+            "livemask-docs", "docs/development", "task-state-ledger.json"
+        )
+        try:
+            with open(ledger_path) as f:
+                ledger = json.load(f)
+            for mod in ledger.get("modules", []):
+                for t in mod.get("tasks", []):
+                    if t.get("task_id") == task_id:
+                        s = t.get("status", "")
+                        if s in ("completed", "completed_with_skip"):
+                            print(f"[log-watch][phase4] task {task_id} already {s} in ledger — advancing session", flush=True)
+                            subprocess.run(
+                                [sys.executable, os.path.join(PY_DIR, "session.py"),
+                                 "save", task_id, "verifying", "--branch", f"task/{task_id}"],
+                                capture_output=True, timeout=30,
+                            )
+                            return True
+        except Exception:
+            pass
+        return False
+
+    # Step 1: Check if auto-implementable
+    try:
+        r = subprocess.run(
+            [sys.executable, auto_impl_py, "detect", task_id],
+            capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode == 0:
+            print(f"[log-watch][phase4] task {task_id} IS auto-implementable — running impl...", flush=True)
+            # Step 2: Auto-implement
+            try:
+                r2 = subprocess.run(
+                    [sys.executable, auto_impl_py, "impl", task_id],
+                    capture_output=True, text=True, timeout=60,
+                )
+                print(f"[log-watch][phase4] auto_implement.py impl result: {r2.stdout.strip()}", flush=True)
+                if r2.returncode == 0:
+                    print(f"[log-watch][phase4] ✅ auto-implemented {task_id}", flush=True)
+                    return True
+                print(f"[log-watch][phase4] impl failed: {r2.stderr.strip()}", flush=True)
+                return False
+            except subprocess.TimeoutExpired:
+                print(f"[log-watch][phase4] impl timed out for {task_id}", flush=True)
+                return False
+            except Exception as e:
+                print(f"[log-watch][phase4] impl error: {e}", flush=True)
+                return False
+        else:
+            # Task is NOT auto-implementable — this is a real code task
+            print(f"[log-watch][phase4] task {task_id} requires real implementation (not auto-implementable)", flush=True)
+            print(f"[log-watch][phase4] Reason: {r.stdout.strip() or r.stderr.strip()}", flush=True)
+            print(f"[log-watch][phase4] This task needs an AI agent or human to implement the code.", flush=True)
+            print(f"[log-watch][phase4] The daemon will keep checking — once session advances, it continues.", flush=True)
+            return False
+    except subprocess.TimeoutExpired:
+        print(f"[log-watch][phase4] detect timed out for {task_id}", flush=True)
+        return False
+    except Exception as e:
+        print(f"[log-watch][phase4] detect error: {e}", flush=True)
+        return False
+
+
 def _auto_repair(logfile: str, new_lines: str):
     """Check new lines for errors, then try experience system + repair.py."""
     import re
@@ -141,11 +248,50 @@ def _auto_repair(logfile: str, new_lines: str):
             print(f"[log-watch] repair.py error: {e}", flush=True)
 
 
+def _check_stuck_phase4():
+    """Independent check: is session stuck in Phase 4? If so, resolve."""
+    phase = _session_phase()
+    task_id = _session_task_id()
+    if not task_id or phase not in ("implementing", "context_loaded"):
+        return
+
+    # Check log files for "waiting for implementation"
+    found_waiting = False
+    for watch_dir in WATCH_DIRS:
+        if not os.path.isdir(watch_dir):
+            continue
+        for entry in sorted(os.listdir(watch_dir), reverse=True):
+            fpath = os.path.join(watch_dir, entry)
+            if "claude-dev-loop" not in entry or not os.path.isfile(fpath):
+                continue
+            try:
+                with open(fpath, "r") as f:
+                    content = f.read()
+                if "waiting for implementation" in content:
+                    found_waiting = True
+                    break
+            except (OSError, IOError):
+                continue
+        if found_waiting:
+            break
+
+    if not found_waiting:
+        return
+
+    print(f"[log-watch][phase4] stuck detected: {task_id} (phase={phase})", flush=True)
+    if _fix_counter_check():
+        _resolve_stuck_phase4()
+
+
 def poll_once():
     """Single poll cycle: scan log dirs, check for new lines, auto-repair."""
     now_ts = time.time()
     cutoff = now_ts - 300  # 5 minutes
 
+    # ── Check for Phase 4 stuck state ──
+    _check_stuck_phase4()
+
+    # ── Normal: scan log dirs for new error lines ──
     for watch_dir in WATCH_DIRS:
         if not os.path.isdir(watch_dir):
             continue
