@@ -325,7 +325,7 @@ def poll_once():
 
 
 def daemon_loop():
-    """Continuous daemon loop (poll every 5s)."""
+    """Continuous daemon loop (poll every 5s) with auto-reload."""
     pid_file = os.path.join(CACHE_DIR, "log-watch.pid")
     with open(pid_file, "w") as f:
         f.write(str(os.getpid()))
@@ -337,13 +337,26 @@ def daemon_loop():
         except OSError:
             pass
     atexit.register(_cleanup)
-    print("[log-watch] daemon started (poll every 5s)", flush=True)
+
+    # Auto-reload watchdog: monitor own file + py_dir + lib_dir for changes
+    from watchdog import Watchdog
+    w = Watchdog(poll_interval=60)  # check every 60s
+    w.watch(os.path.abspath(__file__))
+    w.watch_dir(os.path.dirname(__file__))                     # scripts/lib/py/
+    w.watch_dir(os.path.dirname(os.path.dirname(__file__)))    # scripts/lib/
+
+    print("[log-watch] daemon started (poll every 5s, auto-reload every 60s)", flush=True)
     while True:
+        if w.changed():
+            w.restart()
         try:
             poll_once()
         except Exception as e:
             print(f"[log-watch] poll error: {e}", flush=True)
-        time.sleep(5)
+        for _ in range(12):  # fill the 60s watchdog cycle with 5s poll intervals
+            if w.changed():
+                w.restart()
+            time.sleep(5)
 
 
 def main():
