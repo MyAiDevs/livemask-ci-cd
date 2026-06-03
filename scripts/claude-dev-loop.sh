@@ -364,8 +364,28 @@ except: print('')
             log_info "session already at 'completed' — skipping Phase 4 wait, proceeding to completion"
             START_PHASE=6
         elif [ "${PREV_PHASE}" = "blocked" ]; then
-            log_fail "task blocked — see session state for details"
-            exit 1
+            log_warn "task session is blocked — re-verifying evidence chain..."
+            HEAL_OUT=$(python3 "${PY_DIR}/auto_evidence.py" heal "${TASK_ID}" 2>/dev/null || echo '{}')
+            HEAL_CNT=$(echo "${HEAL_OUT}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('actions_taken', [])))" 2>/dev/null || echo "0")
+            # Re-read session to see if heal advanced it
+            NEW_PHASE=$(python3 -c "
+import json
+try: d = json.load(open('${SESSION_STATE}')); print(d.get('phase', ''))
+except: print('')
+" 2>/dev/null || echo "")
+            if [ "${NEW_PHASE}" = "completed" ]; then
+                log_ok "auto-evidence healed — session now completed, proceeding to Phase 6"
+                START_PHASE=6
+            elif [ "${NEW_PHASE}" = "verifying" ] || [ "${NEW_PHASE}" = "verified" ]; then
+                log_ok "auto-evidence healed ${HEAL_CNT} issue(s) — advancing to verifying"
+                START_PHASE=5
+            elif [ "${HEAL_CNT}" -gt 0 ]; then
+                log_ok "auto-evidence healed ${HEAL_CNT} issue(s) — proceeding to Phase 5"
+                START_PHASE=5
+            else
+                log_fail "task blocked — auto-evidence could not heal"
+                exit 1
+            fi
         else
             # Only overwrite if no meaningful progress detected
             python3 "${PY_DIR}/session.py" save "${TASK_ID:-unknown}" "implementing" \
@@ -402,24 +422,36 @@ except: print('')
 
                 # ── Fallback: check if task is already completed in ledger ──
                 if [ "${START_PHASE:-4}" -eq 4 ]; then
-                    LEDGER_DONE=$(python3 -c "
+                    LEDGER_CHECK=$(python3 -c "
 import json
 try:
     ledger = json.load(open('${DOCS_DIR}/docs/development/task-state-ledger.json'))
     target = '${TASK_ID}'
     for m in ledger.get('modules', []):
         for t in m.get('tasks', []):
-            if t.get('task_id') == target and t.get('status','') in ('completed','completed_with_skip','blocked'):
-                print('YES')
+            if t.get('task_id') == target:
+                print(t.get('status', ''))
                 exit(0)
-    print('NO')
-except: print('NO')
+    print('NOT_FOUND')
+except: print('NOT_FOUND')
 " 2>/dev/null)
-                    if [ "${LEDGER_DONE}" = "YES" ]; then
+                    if [ "${LEDGER_CHECK}" = "completed" ] || [ "${LEDGER_CHECK}" = "completed_with_skip" ]; then
                         log_ok "task already completed in ledger — advancing session to verifying"
                         python3 "${PY_DIR}/session.py" save "${TASK_ID}" "verifying" \
                             --branch "task/${TASK_ID}" 2>/dev/null || true
                         START_PHASE=5
+                    elif [ "${LEDGER_CHECK}" = "blocked" ]; then
+                        log_warn "task blocked in ledger — attempting auto-evidence heal..."
+                        HEAL_OUT=$(python3 "${PY_DIR}/auto_evidence.py" heal "${TASK_ID}" 2>/dev/null || echo '{}')
+                        HEAL_CNT=$(echo "${HEAL_OUT}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('actions_taken', [])))" 2>/dev/null || echo "0")
+                        if [ "${HEAL_CNT}" -gt 0 ]; then
+                            log_ok "auto-evidence healed ${HEAL_CNT} issue(s) — advancing to verifying"
+                            python3 "${PY_DIR}/session.py" save "${TASK_ID}" "verifying" \
+                                --branch "task/${TASK_ID}" 2>/dev/null || true
+                            START_PHASE=5
+                        else
+                            log_warn "blocked task could not be healed — falling through to wait"
+                        fi
                     fi
                 fi
             fi
