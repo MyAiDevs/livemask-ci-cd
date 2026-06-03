@@ -13,6 +13,10 @@ Usage:
 """
 import json, os, sys, time, subprocess, pathlib
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
+_debug_setup()
+
 EVENT_DIR = pathlib.Path(os.path.expanduser("~/.claude/role-cache/webhook-events"))
 CURSOR_FILE = EVENT_DIR / "consumer-cursor.txt"
 INBOX_FILE = EVENT_DIR / "inbox.jsonl"
@@ -89,6 +93,7 @@ def process_event(evt):
     return False
 
 
+@traced
 def cmd_process():
     cursor = _get_cursor()
     if not INBOX_FILE.exists():
@@ -113,6 +118,7 @@ def cmd_process():
         return -1
 
 
+@traced
 def cmd_daemon():
     from watchdog import Watchdog
     w = Watchdog(poll_interval=60)

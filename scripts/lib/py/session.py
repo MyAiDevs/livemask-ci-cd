@@ -24,6 +24,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 
 SESSION_DIR = Path.home() / ".claude" / "role-cache"
 SESSION_FILE = SESSION_DIR / "session-state.json"
@@ -39,6 +41,7 @@ def _now_iso() -> str:
 
 # ── Commands ──────────────────────────────────────────────────────────
 
+@traced
 def cmd_save(args: list[str]) -> int:
     """session.py save <task_id> <status> [--branch <b>] [--retry <n>] [--error <msg>]"""
     if len(args) < 2:
@@ -101,6 +104,7 @@ def cmd_save(args: list[str]) -> int:
     return 0
 
 
+@traced
 def cmd_load(args: list[str]) -> int:
     """session.py load <task_id>"""
     if not args:
@@ -128,6 +132,7 @@ def cmd_load(args: list[str]) -> int:
     return 0
 
 
+@traced
 def cmd_clean(args: list[str]) -> int:
     """session.py clean — Remove all session state files."""
     _ensure_dir()
@@ -148,6 +153,7 @@ def cmd_clean(args: list[str]) -> int:
 # ── Entry point ───────────────────────────────────────────────────────
 
 def main():
+    _debug_setup()
     if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
         print(__doc__)
         return 0 if sys.argv[1:2] in (["--help"], ["-h"]) else 1

@@ -45,6 +45,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "cache")
 LIVEMASK_ROOT = os.environ.get("LIVEMASK_ROOT",
                                 os.path.expanduser("~/Developer/LiveMask"))
@@ -734,6 +736,7 @@ def cmd_learn(args: list[str]) -> int:
 # MAIN
 # ─────────────────────────────────────────────────────────────────────
 
+@traced
 def main():
     if len(sys.argv) < 3 or sys.argv[1] in ("--help", "-h"):
         print(__doc__)
@@ -783,4 +786,5 @@ def main():
 
 
 if __name__ == "__main__":
+    _debug_setup()
     main()

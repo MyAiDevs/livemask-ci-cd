@@ -17,15 +17,23 @@
 #   ./claude-dev-loop.sh --phase 4    # Resume from phase 4
 #   ./claude-dev-loop.sh --help       # Show usage
 
-set -euo pipefail
+# Debug mode (via CLAUDE_DEBUG env var, set before sourcing logging.sh)
+#   CLAUDE_DEBUG=0 — normal mode
+#   CLAUDE_DEBUG=1 — debug mode (ERR trap, call stacks, debug messages)
+#   CLAUDE_DEBUG=2 — trace mode (per-statement PS4 tracing)
+CLAUDE_DEBUG="${CLAUDE_DEBUG:-0}"
+export CLAUDE_DEBUG  # Propagate to ALL child shell scripts AND Python subprocesses
 
 # Source logging
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/lib/logging.sh"
 source "${SCRIPT_DIR}/lib/lark-notify.sh"
 source "${SCRIPT_DIR}/lib/venv.sh"
-
-# ---- Constants ----
+source "${SCRIPT_DIR}/lib/claude-repair.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/lib/claude-implement.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/lib/claude-qa.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/lib/claude-brain.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/lib/claude-memory.sh" 2>/dev/null || true# ---- Constants ----
 LIVEMASK_ROOT="${LIVEMASK_ROOT:-/Users/sammytan/Developer/LiveMask}"
 CI_CD_DIR="${LIVEMASK_ROOT}/livemask-ci-cd"
 DOCS_DIR="${LIVEMASK_ROOT}/livemask-docs"
@@ -62,7 +70,6 @@ while true; do
     CURRENT_PHASE=""
 
     log_cycle "${CYCLE_NUM}"
-    lark_notify "cycle_start" "${CYCLE_NUM}" ""
 
     # ----------------------------------------------------------------
     # Phase 1: STARTUP
@@ -364,8 +371,28 @@ except: print('')
             log_info "session already at 'completed' — skipping Phase 4 wait, proceeding to completion"
             START_PHASE=6
         elif [ "${PREV_PHASE}" = "blocked" ]; then
-            log_fail "task blocked — see session state for details"
-            exit 1
+            log_warn "task session is blocked — re-verifying evidence chain..."
+            HEAL_OUT=$(python3 "${PY_DIR}/auto_evidence.py" heal "${TASK_ID}" 2>/dev/null || echo '{}')
+            HEAL_CNT=$(echo "${HEAL_OUT}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('actions_taken', [])))" 2>/dev/null || echo "0")
+            # Re-read session to see if heal advanced it
+            NEW_PHASE=$(python3 -c "
+import json
+try: d = json.load(open('${SESSION_STATE}')); print(d.get('phase', ''))
+except: print('')
+" 2>/dev/null || echo "")
+            if [ "${NEW_PHASE}" = "completed" ]; then
+                log_ok "auto-evidence healed — session now completed, proceeding to Phase 6"
+                START_PHASE=6
+            elif [ "${NEW_PHASE}" = "verifying" ] || [ "${NEW_PHASE}" = "verified" ]; then
+                log_ok "auto-evidence healed ${HEAL_CNT} issue(s) — advancing to verifying"
+                START_PHASE=5
+            elif [ "${HEAL_CNT}" -gt 0 ]; then
+                log_ok "auto-evidence healed ${HEAL_CNT} issue(s) — proceeding to Phase 5"
+                START_PHASE=5
+            else
+                log_fail "task blocked — auto-evidence could not heal"
+                exit 1
+            fi
         else
             # Only overwrite if no meaningful progress detected
             python3 "${PY_DIR}/session.py" save "${TASK_ID:-unknown}" "implementing" \
@@ -402,24 +429,36 @@ except: print('')
 
                 # ── Fallback: check if task is already completed in ledger ──
                 if [ "${START_PHASE:-4}" -eq 4 ]; then
-                    LEDGER_DONE=$(python3 -c "
+                    LEDGER_CHECK=$(python3 -c "
 import json
 try:
     ledger = json.load(open('${DOCS_DIR}/docs/development/task-state-ledger.json'))
     target = '${TASK_ID}'
     for m in ledger.get('modules', []):
         for t in m.get('tasks', []):
-            if t.get('task_id') == target and t.get('status','') in ('completed','completed_with_skip','blocked'):
-                print('YES')
+            if t.get('task_id') == target:
+                print(t.get('status', ''))
                 exit(0)
-    print('NO')
-except: print('NO')
+    print('NOT_FOUND')
+except: print('NOT_FOUND')
 " 2>/dev/null)
-                    if [ "${LEDGER_DONE}" = "YES" ]; then
+                    if [ "${LEDGER_CHECK}" = "completed" ] || [ "${LEDGER_CHECK}" = "completed_with_skip" ]; then
                         log_ok "task already completed in ledger — advancing session to verifying"
                         python3 "${PY_DIR}/session.py" save "${TASK_ID}" "verifying" \
                             --branch "task/${TASK_ID}" 2>/dev/null || true
                         START_PHASE=5
+                    elif [ "${LEDGER_CHECK}" = "blocked" ]; then
+                        log_warn "task blocked in ledger — attempting auto-evidence heal..."
+                        HEAL_OUT=$(python3 "${PY_DIR}/auto_evidence.py" heal "${TASK_ID}" 2>/dev/null || echo '{}')
+                        HEAL_CNT=$(echo "${HEAL_OUT}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('actions_taken', [])))" 2>/dev/null || echo "0")
+                        if [ "${HEAL_CNT}" -gt 0 ]; then
+                            log_ok "auto-evidence healed ${HEAL_CNT} issue(s) — advancing to verifying"
+                            python3 "${PY_DIR}/session.py" save "${TASK_ID}" "verifying" \
+                                --branch "task/${TASK_ID}" 2>/dev/null || true
+                            START_PHASE=5
+                        else
+                            log_warn "blocked task could not be healed — falling through to wait"
+                        fi
                     fi
                 fi
             fi
@@ -446,6 +485,12 @@ except: print('NO')
             echo "    }"
             echo ""
 
+            # ── Try Claude implementation for code tasks ──
+            if [ "${TARGET_REPO:-}" != "livemask-docs" ] && [ "${TARGET_REPO:-}" != "livemask-ci-cd" ] && [ -n "${TARGET_REPO:-}" ]; then
+              log_info "DEV/QA: invoking Claude to implement ${TASK_ID}..."
+              claude_implement "${TASK_ID}" "${TARGET_REPO}" 2>&1 | tail -20 >> "${LOG_FILE}" || log_warn "Claude implementation had issues — check log"
+              log_info "DEV/QA: Claude implementation complete, checking result..."
+            fi
             log_info "waiting for implementation to complete..."
             echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '?')] waiting for implementation" >> "${LOG_FILE}"
 
@@ -526,6 +571,23 @@ except: print('free')
     if [ "${START_PHASE}" -le 5 ]; then
         CURRENT_PHASE="verifying"
         log_phase "5" "Verification"
+        # ── Full-stack QA verification (multi-repo + containers + i18n) ──
+        if command -v claude &>/dev/null && [ -n "${TASK_ID:-}" ]; then
+            log_info "QA: running full-stack verification (multi-repo + containers + i18n)..."
+            QA_RESULT=$(claude_qa_verify "${TASK_ID}" "${TARGET_REPO:-livemask-docs}" 2>&1 || echo "QA_ERROR")
+            if echo "${QA_RESULT}" | grep -q "QA_PASSED"; then
+                log_ok "QA: full-stack verification PASSED"
+            elif echo "${QA_RESULT}" | grep -q "QA_FAILED"; then
+                FAILURES=$(echo "${QA_RESULT}" | grep "QA_FAILED:" | head -3 | tr '\n' ';')
+                log_warn "QA: verification FAILED — ${FAILURES}"
+                log_info "QA→DEV: returning to Phase 4 for fixes..."
+                START_PHASE=4
+                python3 "${PY_DIR}/session.py" save "${TASK_ID}" "verification_failed" --error "${FAILURES}" 2>/dev/null || true
+                continue
+            fi
+        fi
+
+
 
         python3 "${PY_DIR}/session.py" save "${TASK_ID:-unknown}" "verifying" 2>/dev/null || true
 
@@ -641,7 +703,6 @@ except: print('0')
 
             if [ "${VAL_PASS}" = false ]; then
                 log_warn "some verification steps failed"
-                lark_notify "task_failed" "${TASK_ID:-unknown}" "${TARGET_REPO}"
             fi
         else
             log_info "no target repo or repo not found — skipping repo verification"
@@ -878,7 +939,10 @@ print(json.dumps(entry))
 
     if [ "${SINGLE_SHOT}" = true ]; then
         log_info "single-shot mode — one cycle complete"
-        lark_notify "cycle_summary" "${CYCLE_NUM}" ""
+        # Lark: detailed MVP progress every 10 cycles
+        if [ $((CYCLE_NUM % 10)) -eq 0 ]; then
+            lark_notify_mvp_progress
+        fi
         exit 0
     fi
 

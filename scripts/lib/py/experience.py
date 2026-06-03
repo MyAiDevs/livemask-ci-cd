@@ -27,6 +27,8 @@ import time
 from collections import defaultdict, Counter
 from typing import Optional
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 EXPERIENCE_FILE = os.path.join(os.path.expanduser("~"), ".claude", "cache", "experience.json")
 MAX_RECORDS = 1000
 
@@ -434,7 +436,9 @@ def cmd_stats(args: list[str]) -> int:
     return 0
 
 
+@traced
 def main():
+    _debug_setup()
     if len(sys.argv) < 2:
         print(json.dumps({"error": "usage: experience.py <record|suggest|_apply|stats> [...]"}))
         sys.exit(1)

@@ -31,6 +31,8 @@ import sys
 import time
 from typing import Any, Optional
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 
 # ── Fast JSON via orjson ───────────────────────────────────────────────
 
@@ -407,4 +409,5 @@ def main():
 
 
 if __name__ == "__main__":
+    _debug_setup()
     main()

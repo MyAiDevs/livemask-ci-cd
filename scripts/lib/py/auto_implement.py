@@ -17,6 +17,10 @@ Usage:
 import json, os, re, sys, subprocess, glob
 from pathlib import Path
 
+from debug_utils import setup as _debug_setup, traced
+
+_debug_setup()
+
 LIVEMASK_ROOT = os.environ.get(
     "LIVEMASK_ROOT",
     str(Path(__file__).resolve().parent.parent.parent.parent.parent),
@@ -146,6 +150,16 @@ def analyze(tid):
     info.contract_rel_path = os.path.relpath(cpath, DOCS_DIR)
     for f in sorted(glob.glob(os.path.join(TASKS_DIR, f"{tid}*.md"))):
         if f != tdoc: info.detail_doc_path = f; break
+
+    # ── CRITICAL: reject code tasks — auto_implement only handles docs ──
+    CODE_REPOS = {"livemask-admin", "livemask-backend", "livemask-app",
+                  "livemask-nodeagent", "livemask-job-service", "livemask-website"}
+    task_repo = info.repo
+    if task_repo and task_repo in CODE_REPOS:
+        info.auto_implementable = False
+        info.reason = f"code task targeting {task_repo}"
+        return info
+
     info.auto_implementable = True
     info.reason = "docs-only planner task"
     return info
@@ -312,6 +326,7 @@ def cmd_detect(tid):
     print(f"AUTO-IMPLEMENTABLE: {tid} (contract: {os.path.basename(i.contract_abs_path)})")
     return 0
 
+@traced
 def cmd_impl(tid):
     i = analyze(tid)
     if not i.auto_implementable: print(f"NO: {i.reason}"); return 1

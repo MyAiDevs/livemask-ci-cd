@@ -117,7 +117,15 @@ done
 [[ "${task_branch}" != *","* && "${task_branch}" != *" "* ]] || die "batch branch lists are forbidden; merge one task branch at a time"
 [[ "${task_branch}" != "dev" && "${task_branch}" != "main" ]] || die "refusing to merge protected branch '${task_branch}' as a task branch"
 
-repo="$(cd -- "${repo}" && pwd -P)"
+repo="$(cd -- "${repo}" && pwd -P)" 2>/dev/null || true
+# If resolved path doesn't have .git, try alternative root-relative path
+if [[ ! -d "${repo}/.git" ]]; then
+    alt="${LIVEMASK_WORKSPACE_ROOT}/${repo}"
+    alt="$(cd -- "${alt}" 2>/dev/null && pwd -P || true)"
+    if [[ -n "${alt}" && -d "${alt}/.git" ]]; then
+        repo="${alt}"
+    fi
+fi
 [[ -d "${repo}/.git" ]] || die "not a git repository: ${repo}"
 
 git_in_repo() {
@@ -156,7 +164,7 @@ if [[ -z "${task_id}" && -n "${legacy_single_branch}" ]]; then
 fi
 
 [[ -n "${task_id}" ]] || die "--task-id is required"
-[[ "${task_id}" =~ ^TASK-[A-Z0-9]+(-[A-Z0-9]+)*$ ]] || die "--task-id must look like TASK-XXXX"
+[[ "${task_id}" =~ ^TASK-[A-Za-z0-9]+(-[A-Za-z0-9]+)*$ ]] || die "--task-id must look like TASK-XXXX"
 
 repo_name="$(basename "${repo}")"
 timestamp="$(date +%Y%m%d%H%M%S)"

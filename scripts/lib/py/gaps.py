@@ -7,6 +7,7 @@ Usage:
 """
 import json, re, sys, argparse
 from pathlib import Path
+from debug_utils import setup as _debug_setup, traced, logger as _logger
 
 REPO_MAP = {
     "Backend": "livemask-backend", "Admin": "livemask-admin",
@@ -90,7 +91,9 @@ def audit_debt(audit_file: Path) -> tuple[int, int]:
         return 0, 0
 
 
+@traced
 def main():
+    _debug_setup()
     parser = argparse.ArgumentParser(description="Contract gap detection")
     sub = parser.add_subparsers(dest="command", required=True)
 

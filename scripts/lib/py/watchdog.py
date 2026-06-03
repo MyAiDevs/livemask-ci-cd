@@ -13,6 +13,8 @@ Usage:
 """
 import os, sys, time
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 
 class Watchdog:
     def __init__(self, poll_interval: int = 30):

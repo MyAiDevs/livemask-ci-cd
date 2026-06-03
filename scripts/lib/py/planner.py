@@ -34,6 +34,8 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 
 # ── Constants ──────────────────────────────────────────────────────────────
 REPO_PREFIX = "MyAiDevs"
@@ -941,6 +943,7 @@ def cmd_evidence_show(args: list[str]) -> int:
 
 # ── CLI ────────────────────────────────────────────────────────────────────
 
+@traced
 def cmd_plan(args: list[str]) -> int:
     contract_path = ""
     mvp_path = ""
@@ -1021,6 +1024,7 @@ def cmd_plan(args: list[str]) -> int:
 
 
 def main():
+    _debug_setup()
     if len(sys.argv) < 2:
         print(json.dumps({"error": "usage: planner.py <plan|evidence|evidence-show> [flags]"}),
               file=sys.stderr)
