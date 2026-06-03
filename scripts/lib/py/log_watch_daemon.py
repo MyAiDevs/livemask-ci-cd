@@ -214,14 +214,39 @@ def _resolve_stuck_phase4():
 
 
 def _auto_repair(logfile: str, new_lines: str):
-    """Check new lines for errors, then try experience system + repair.py."""
+    """Check new lines for errors, then try experience system + repair.py + docs-fixer."""
     import re
-    if not re.search(r'(error|fail|panic|exit status|not found)', new_lines, re.IGNORECASE):
+    if not re.search(r'(error|fail|panic|exit status|not found|check-docs|Missing Markdown|Traceability check)', new_lines, re.IGNORECASE):
         return
 
     if not _fix_counter_check():
         print(f"[log-watch] rate limited", flush=True)
         return
+
+    # ── Docs-fixer: detect markdown/doc issues ──
+    if re.search(r'(check-docs\.sh|Missing Markdown|Traceability check|Documentation checks)', new_lines, re.IGNORECASE):
+        docs_fixer = os.path.join(
+            os.environ.get("LIVEMASK_ROOT", os.path.expanduser("~/Developer/LiveMask")),
+            "livemask-docs", "scripts", "docs-fixer.py"
+        )
+        if os.path.exists(docs_fixer):
+            print(f"[log-watch][docs-fixer] running auto-fix...", flush=True)
+            try:
+                r = subprocess.run(
+                    [sys.executable, docs_fixer, "fix"],
+                    capture_output=True, text=True, timeout=60,
+                )
+                result = json.loads(r.stdout) if r.stdout.strip() else {}
+                fc = result.get("fixed_count", 0)
+                if fc > 0:
+                    print(f"[log-watch][docs-fixer] ✅ fixed {fc} doc issue(s)", flush=True)
+                    for a in result.get("actions", []):
+                        print(f"[log-watch][docs-fixer]   {a}", flush=True)
+                else:
+                    uc = result.get("unfixable_count", 0)
+                    print(f"[log-watch][docs-fixer] 0 fixable, {uc} unfixable", flush=True)
+            except Exception as e:
+                print(f"[log-watch][docs-fixer] error: {e}", flush=True)
 
     # 1. Try experience.suggest + _apply
     suggest_file = f"/tmp/log-watch-suggest-{os.getpid()}.json"
