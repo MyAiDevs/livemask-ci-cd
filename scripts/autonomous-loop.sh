@@ -371,37 +371,9 @@ pathlib.Path('${DOCS_DIR}/docs/development/task-state-ledger.json').write_text(j
   # ── Post GitHub status ──────────────────────────────────────────────
   post_github_status "TASK_DISPATCHED" "${tid} in ${repo} — waiting for Claude to implement" 2>/dev/null || true
 
-  # ── Dispatch to Claude: task is ready ──
+  # ── Dispatch to Claude: task is ready, waiting for skill invocation ──
   log_cycle "TASK DISPATCHED: ${tid} → ${repo}"
-
-  # ── Auto-implement: only auto-complete docs/ci-cd tasks (self-validating) ──
-  # For backend/admin/app/etc, build verify but WAIT for Claude to implement real changes
-  source "${CI_CD_DIR}/scripts/lib/impl-assist.sh" 2>/dev/null || true
-  if impl_auto_code "${tid}" 2>/dev/null; then
-    if [[ "${repo}" == "livemask-docs" || "${repo}" == "livemask-ci-cd" ]]; then
-      log_cycle "AUTO-IMPL: docs/ci-cd task — auto-completing"
-      python3 -c "
-import json
-from datetime import datetime,timezone
-p='${DOCS_DIR}/docs/development/task-state-ledger.json'
-l=json.loads(open(p).read())
-for m in l.get('modules',[]):
-    for t in m.get('tasks',[]):
-        if t.get('task_id')=='${tid}':
-            t['status']='completed'
-            t['dev_merge_commit']='auto-impl'
-            t['remote_dev_ref']='origin/dev'
-            t['validation']='[auto-impl: build verified]'
-            t['_last_status_change_at']=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-open(p,'w').write(json.dumps(l,indent=2,ensure_ascii=False))
-" 2>/dev/null
-      rm -f "${DOCS_DIR}/docs/development/dispatch-packets/${tid}.json" 2>/dev/null
-      log_cycle "AUTO-IMPLEMENT COMPLETE: ${tid}"
-      continue
-    else
-      log_cycle "AUTO-IMPL: build verified for ${repo} — waiting for Claude to implement"
-    fi
-  fi
+  log_cycle "Invoke: /task-implement ${tid}   (or Claude will pick up automatically)"
 
   # ── Monitor loop: wait for Claude to implement and complete ─────────
   wait_count=0; liveness_grace=2
