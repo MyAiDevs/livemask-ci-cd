@@ -12,7 +12,7 @@ CI_CD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WEBHOOK_SRC="${CI_CD_DIR}/scripts/webhook-server.py"
 
 echo "═══════════════════════════════════════════"
-echo "  LIVEMASK CI/CD — Webhook v4 Deploy"
+echo "  LIVEMASK CI/CD — Webhook v5 Deploy"
 echo "═══════════════════════════════════════════"
 echo "  Target: ${SERVER}"
 echo "  Port:   ${PORT}"

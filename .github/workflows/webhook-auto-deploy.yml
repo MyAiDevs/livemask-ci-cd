@@ -1,0 +1,37 @@
+name: Auto-Deploy Webhook Server
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'scripts/webhook-server.py'
+      - 'scripts/deploy-webhook.sh'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy webhook server
+        env:
+          WEBHOOK_TOKEN: ${{ secrets.WEBHOOK_TOKEN }}
+          GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
+        run: |
+          bash scripts/deploy-webhook.sh
+
+      - name: Trigger reload
+        run: |
+          sleep 3
+          curl -sS -X POST "http://47.243.128.122:10086/reload" \
+            -H "Content-Type: application/json" \
+            -H "X-Webhook-Token: ${{ secrets.WEBHOOK_TOKEN }}" || echo "WARN: reload not ready yet"
+
+      - name: Verify healthy
+        run: |
+          sleep 3
+          HEALTH=$(curl -sS "http://47.243.128.122:10086/health" 2>/dev/null || echo '{"status":"unreachable"}')
+          echo "Health: $HEALTH"
+          echo "$HEALTH" | grep -q '"status":"healthy"' || { echo "ERROR: webhook unhealthy"; exit 1; }
+          echo "Webhook v5 deployed and healthy"
