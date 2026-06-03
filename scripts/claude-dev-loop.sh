@@ -85,7 +85,7 @@ while true; do
 
         # ── Scan GitHub for new untracked issues ──────────────────────
         log_info "scanning GitHub for new issues..."
-        python3 "${PY_DIR}/task_intake.py" scan-github 2>/dev/null || log_info "GitHub scan skipped (gh CLI unavailable or no new issues)"
+        (python3 "${PY_DIR}/task_intake.py" scan-github 2>/dev/null &) || log_info "GitHub scan skipped (gh CLI unavailable or no new issues)"
 
         # ── Build shared knowledge base (cached, fast) ────────────────
         python3 "${PY_DIR}/shared_knowledge.py" build --skip-github 2>/dev/null || true
@@ -334,94 +334,116 @@ except: print('?')
         CURRENT_PHASE="implementing"
         log_phase "4" "Implementation"
 
-        python3 "${PY_DIR}/session.py" save "${TASK_ID:-unknown}" "implementing" \
-            --branch "task/${TASK_ID:-unknown}" 2>/dev/null || true
+        # ── Guard: check if previous cycle already advanced past implementing ──
+        PREV_PHASE=""
+        if [ -f "${SESSION_STATE}" ]; then
+            PREV_PHASE=$(python3 -c "
+import json
+try: d = json.load(open('${SESSION_STATE}')); print(d.get('phase', ''))
+except: print('')
+" 2>/dev/null || echo "")
+        fi
 
-        echo ""
-        log_info "auto-repair() helper:"
-        echo ""
-        echo "    auto-repair() {"
-        echo "      local cmd=\"\$1\" logf=\"/tmp/repair-\$\$.log\""
-        echo "      local retry=\$(python3 -c \"import json; s=json.load(open('${SESSION_STATE}')); print(s.get('retry_count',0))\")"
-        echo "      if eval \"\$cmd\" > \"\$logf\" 2>&1; then"
-        echo "        log_ok \"\$cmd — PASS\""
-        echo "        return 0"
-        echo "      fi"
-        echo "      retry=\$((retry + 1))"
-        echo "      python3 ${PY_DIR}/session.py save '${TASK_ID:-unknown}' 'implementing' --retry \"\$retry\""
-        echo "      python3 ${PY_DIR}/repair.py build \"\$logf\""
-        echo "      if [ \"\$retry\" -gt 3 ]; then"
-        echo "        log_fail \"repair exhausted — marking blocked\""
-        echo "        python3 ${PY_DIR}/session.py save '${TASK_ID:-unknown}' 'blocked' --error 'repair exhausted'"
-        echo "        return 1"
-        echo "      fi"
-        echo "      return 2  # signal retry"
-        echo "    }"
-        echo ""
+        if [ "${PREV_PHASE}" = "verifying" ]; then
+            log_info "session already at 'verifying' — skipping Phase 4 wait, proceeding to verification"
+            START_PHASE=5
+        elif [ "${PREV_PHASE}" = "completed" ]; then
+            log_info "session already at 'completed' — skipping Phase 4 wait, proceeding to completion"
+            START_PHASE=6
+        elif [ "${PREV_PHASE}" = "blocked" ]; then
+            log_fail "task blocked — see session state for details"
+            exit 1
+        else
+            # Only overwrite if no meaningful progress detected
+            python3 "${PY_DIR}/session.py" save "${TASK_ID:-unknown}" "implementing" \
+                --branch "task/${TASK_ID:-unknown}" 2>/dev/null || true
 
-        log_info "waiting for implementation to complete..."
-        echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '?')] waiting for implementation" >> "${LOG_FILE}"
+            echo ""
+            log_info "auto-repair() helper:"
+            echo ""
+            echo "    auto-repair() {"
+            echo "      local cmd=\"\$1\" logf=\"/tmp/repair-\$\$.log\""
+            echo "      local retry=\$(python3 -c \"import json; s=json.load(open('${SESSION_STATE}')); print(s.get('retry_count',0))\")"
+            echo "      if eval \"\$cmd\" > \"\$logf\" 2>&1; then"
+            echo "        log_ok \"\$cmd — PASS\""
+            echo "        return 0"
+            echo "      fi"
+            echo "      retry=\$((retry + 1))"
+            echo "      python3 ${PY_DIR}/session.py save '${TASK_ID:-unknown}' 'implementing' --retry \"\$retry\""
+            echo "      python3 ${PY_DIR}/repair.py build \"\$logf\""
+            echo "      if [ \"\$retry\" -gt 3 ]; then"
+            echo "        log_fail \"repair exhausted — marking blocked\""
+            echo "        python3 ${PY_DIR}/session.py save '${TASK_ID:-unknown}' 'blocked' --error 'repair exhausted'"
+            echo "        return 1"
+            echo "      fi"
+            echo "      return 2  # signal retry"
+            echo "    }"
+            echo ""
 
-        # Poll session state every 30s for up to 60 minutes
-        WAIT_COUNT=0
-        while [ "${WAIT_COUNT}" -lt 120 ]; do
-            sleep 30
-            WAIT_COUNT=$((WAIT_COUNT + 1))
+            log_info "waiting for implementation to complete..."
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '?')] waiting for implementation" >> "${LOG_FILE}"
 
-            if [ -f "${SESSION_STATE}" ]; then
-                SESSION_PHASE=$(python3 -c "
+            # Poll session state every 30s for up to 60 minutes
+            WAIT_COUNT=0
+            while [ "${WAIT_COUNT}" -lt 120 ]; do
+                sleep 30
+                WAIT_COUNT=$((WAIT_COUNT + 1))
+
+                if [ -f "${SESSION_STATE}" ]; then
+                    SESSION_PHASE=$(python3 -c "
 import json
 try: d = json.load(open('${SESSION_STATE}')); print(d.get('phase', ''))
 except: print('')
 " 2>/dev/null || echo "")
 
-                if [ "${SESSION_PHASE}" = "verifying" ] || [ "${SESSION_PHASE}" = "completed" ]; then
-                    log_ok "implementation complete — phase changed to ${SESSION_PHASE}"
-                    if [ "${SESSION_PHASE}" = "completed" ]; then
-                        START_PHASE=6
-                    else
-                        START_PHASE=5
+                    if [ "${SESSION_PHASE}" = "verifying" ] || [ "${SESSION_PHASE}" = "completed" ]; then
+                        log_ok "implementation complete — phase changed to ${SESSION_PHASE}"
+                        if [ "${SESSION_PHASE}" = "completed" ]; then
+                            START_PHASE=6
+                        else
+                            START_PHASE=5
+                        fi
+                        break
+                    elif [ "${SESSION_PHASE}" = "blocked" ]; then
+                        log_fail "task blocked — see session state for details"
+                        exit 1
                     fi
-                    break
-                elif [ "${SESSION_PHASE}" = "blocked" ]; then
-                    log_fail "task blocked — see session state for details"
-                    exit 1
-                fi
-            fi
-
-            # Heartbeat log every 5 minutes
-            if [ $((WAIT_COUNT % 10)) -eq 0 ]; then
-                echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '?')] cycle=${CYCLE_NUM} still waiting for implementation (${WAIT_COUNT} checks so far)" >> "${LOG_FILE}"
-                log_info "still waiting... (${WAIT_COUNT}/120 checks)"
-
-                # Heartbeat the lock every 5 min to prevent stale expiry
-                if [ -n "${TASK_ID:-}" ]; then
-                    python3 "${PY_DIR}/lock.py" heartbeat "task:${TASK_ID}" --ttl 3600 2>/dev/null >/dev/null || true
-                fi
-                if [ -n "${TARGET_REPO:-}" ]; then
-                    python3 "${PY_DIR}/lock.py" heartbeat "repo:${TARGET_REPO}" --ttl 3600 2>/dev/null >/dev/null || true
                 fi
 
-                # ── Health check: verify lock still held ──────────────────
-                LOCK_CHECK=$(python3 "${PY_DIR}/lock.py" check "task:${TASK_ID:-unknown}" 2>/dev/null || echo '{"status":"free"}')
-                LOCK_STATUS_CHECK=$(echo "${LOCK_CHECK}" | python3 -c "
+                # Heartbeat log every 5 minutes
+                if [ $((WAIT_COUNT % 10)) -eq 0 ]; then
+                    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '?')] cycle=${CYCLE_NUM} still waiting for implementation (${WAIT_COUNT} checks so far)" >> "${LOG_FILE}"
+                    log_info "still waiting... (${WAIT_COUNT}/120 checks)"
+
+                    # Heartbeat the lock every 5 min to prevent stale expiry
+                    if [ -n "${TASK_ID:-}" ]; then
+                        python3 "${PY_DIR}/lock.py" heartbeat "task:${TASK_ID}" --ttl 3600 2>/dev/null >/dev/null || true
+                    fi
+                    if [ -n "${TARGET_REPO:-}" ]; then
+                        python3 "${PY_DIR}/lock.py" heartbeat "repo:${TARGET_REPO}" --ttl 3600 2>/dev/null >/dev/null || true
+                    fi
+
+                    # ── Health check: verify lock still held ──────────────────
+                    LOCK_CHECK=$(python3 "${PY_DIR}/lock.py" check "task:${TASK_ID:-unknown}" 2>/dev/null || echo '{"status":"free"}')
+                    LOCK_STATUS_CHECK=$(echo "${LOCK_CHECK}" | python3 -c "
 import sys, json
 try: d = json.load(sys.stdin); print(d.get('status', 'free'))
 except: print('free')
 " 2>/dev/null || echo "free")
-                if [ "${LOCK_STATUS_CHECK}" = "free" ]; then
-                    log_warn "task lock lost — re-acquiring..."
-                    python3 "${PY_DIR}/lock.py" acquire "task:${TASK_ID:-unknown}" \
-                        --ttl 3600 --session "cycle-${CYCLE_NUM}" 2>/dev/null >/dev/null || true
+                    if [ "${LOCK_STATUS_CHECK}" = "free" ]; then
+                        log_warn "task lock lost — re-acquiring..."
+                        python3 "${PY_DIR}/lock.py" acquire "task:${TASK_ID:-unknown}" \
+                            --ttl 3600 --session "cycle-${CYCLE_NUM}" 2>/dev/null >/dev/null || true
+                    fi
                 fi
-            fi
-        done
+            done
 
-        if [ "${WAIT_COUNT}" -ge 120 ]; then
-            log_fail "implementation timeout after 60 minutes"
-            python3 "${PY_DIR}/session.py" save "${TASK_ID:-unknown}" "timeout" \
-                --error "implementation timeout" 2>/dev/null || true
-            exit 1
+            if [ "${WAIT_COUNT}" -ge 120 ]; then
+                log_fail "implementation timeout after 60 minutes"
+                python3 "${PY_DIR}/session.py" save "${TASK_ID:-unknown}" "timeout" \
+                    --error "implementation timeout" 2>/dev/null || true
+                exit 1
+            fi
         fi
     fi
 
