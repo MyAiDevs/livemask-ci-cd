@@ -358,6 +358,30 @@ except: print('')
             python3 "${PY_DIR}/session.py" save "${TASK_ID:-unknown}" "implementing" \
                 --branch "task/${TASK_ID:-unknown}" 2>/dev/null || true
 
+            # ── Auto-implement: try auto_implement.py for docs-only planner tasks ──
+            if [ -n "${TASK_ID:-}" ]; then
+                AUTO_IMPL_RESULT=$(python3 "${PY_DIR}/auto_implement.py" detect "${TASK_ID}" 2>/dev/null || echo "NO: error")
+                AUTO_IMPL_DETECTED=$(echo "${AUTO_IMPL_RESULT}" | head -1 | grep -c "^AUTO-IMPLEMENTABLE:" || true)
+                if [ "${AUTO_IMPL_DETECTED}" -ge 1 ]; then
+                    log_info "auto-implementable task detected — running auto_implement.py..."
+                    python3 "${PY_DIR}/auto_implement.py" impl "${TASK_ID}" 2>&1 | while IFS= read -r line; do log_info "auto_impl: ${line}"; done
+                    # Check if session was advanced to verifying
+                    if [ -f "${SESSION_STATE}" ]; then
+                        POST_PHASE=$(python3 -c "
+import json
+try: d = json.load(open('${SESSION_STATE}')); print(d.get('phase', ''))
+except: print('')
+" 2>/dev/null || echo "")
+                        if [ "${POST_PHASE}" = "verifying" ]; then
+                            log_ok "auto_implement.py completed — session advanced to verifying, proceeding to Phase 5"
+                            START_PHASE=5
+                        fi
+                    fi
+                    # If auto_implement didn't advance, heartbeat and notify
+                    log_info "auto_implement.py finished but session not advanced — falling through to wait"
+                fi
+            fi
+
             echo ""
             log_info "auto-repair() helper:"
             echo ""
