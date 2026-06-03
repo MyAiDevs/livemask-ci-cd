@@ -83,9 +83,16 @@ while true; do
         # ── Enrich tags from ledger/contracts on each startup ─────────
         python3 "${PY_DIR}/tags.py" enrich 2>/dev/null || true
 
-        # ── Scan GitHub for new untracked issues ──────────────────────
-        log_info "scanning GitHub for new issues..."
-        (python3 "${PY_DIR}/task_intake.py" scan-github 2>/dev/null &) || log_info "GitHub scan skipped (gh CLI unavailable or no new issues)"
+        # ── Consume webhook events (push-based, no API calls) ──────────
+        log_info "consuming webhook inbox events..."
+        python3 "${PY_DIR}/webhook_consumer.py" process 2>/dev/null || true
+
+        # ── Start webhook consumer daemon (if not running) ────────────
+        if ! pgrep -f "webhook_consumer.py daemon" >/dev/null 2>&1; then
+            nohup python3 "${PY_DIR}/webhook_consumer.py" daemon \
+                > /tmp/claude/webhook-consumer.log 2>&1 &
+            log_info "webhook consumer daemon started"
+        fi
 
         # ── Build shared knowledge base (cached, fast) ────────────────
         python3 "${PY_DIR}/shared_knowledge.py" build --skip-github 2>/dev/null || true

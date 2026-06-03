@@ -7,11 +7,12 @@ SERVER="root@47.243.128.122"
 PORT="10086"
 REMOTE_DIR="/opt/livemask-webhook"
 WEBHOOK_TOKEN="${WEBHOOK_TOKEN:-livemask-webhook-2026}"
+GH_WEBHOOK_SECRET="${GH_WEBHOOK_SECRET:-livemask-gh-webhook-2026}"
 CI_CD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WEBHOOK_SRC="${CI_CD_DIR}/scripts/webhook-server.py"
 
 echo "═══════════════════════════════════════════"
-echo "  LIVEMASK CI/CD — Webhook Deploy"
+echo "  LIVEMASK CI/CD — Webhook v4 Deploy"
 echo "═══════════════════════════════════════════"
 echo "  Target: ${SERVER}"
 echo "  Port:   ${PORT}"
@@ -42,10 +43,11 @@ echo "--- Deploy Files ---"
 scp "${WEBHOOK_SRC}" "${SERVER}:${REMOTE_DIR}/webhook-server.py" 2>/dev/null
 echo "  webhook-server.py: deployed"
 
-# Step 5: Create start script
+# Step 5: Create start script with GH_WEBHOOK_SECRET
 ssh "${SERVER}" "cat > ${REMOTE_DIR}/start.sh << 'EOF'
 #!/bin/bash
 export WEBHOOK_TOKEN=\"${WEBHOOK_TOKEN}\"
+export GH_WEBHOOK_SECRET=\"${GH_WEBHOOK_SECRET}\"
 export LARK_WEBHOOK_URL='https://open.larksuite.com/open-apis/bot/v2/hook/803303ee-1632-4a99-8847-a071b3c832ad'
 export LARK_SIGN_KEY='maVOYNybtveyeOzS5f73td'
 cd ${REMOTE_DIR}
@@ -55,7 +57,7 @@ nohup python3 webhook-server.py --port ${PORT} > /var/log/livemask-webhook.log 2
 echo \"Webhook PID: \$!\"
 EOF
 chmod +x ${REMOTE_DIR}/start.sh" 2>/dev/null
-echo "  start.sh: deployed"
+echo "  start.sh: deployed (GH_WEBHOOK_SECRET configured)"
 
 # Step 6: Restart service
 echo "--- Restart Service ---"
@@ -74,14 +76,16 @@ fi
 # Local health check
 if curl -sS --connect-timeout 3 "http://47.243.128.122:${PORT}/health" 2>/dev/null | grep -q healthy; then
   echo "  Endpoint: REACHABLE"
+  echo "  Payload URL: http://47.243.128.122:${PORT}/github-issue"
 else
   echo "  Endpoint: UNREACHABLE — may need firewall rule: iptables -I INPUT -p tcp --dport ${PORT} -j ACCEPT"
 fi
 
 echo ""
 echo "═══════════════════════════════════════════"
-echo "  Deploy complete"
+echo "  Deploy complete — v4 with GitHub Issue webhook"
+echo "  GitHub Payload URL: http://47.243.128.122:${PORT}/github-issue"
+echo "  Webhook Secret: ${GH_WEBHOOK_SECRET}"
 echo "  Lark URL: https://open.larksuite.com/open-apis/bot/v2/hook/803303ee-***"
-echo "  Webhook:  http://47.243.128.122:${PORT}"
 echo "  Log:      ssh ${SERVER} tail -F /var/log/livemask-webhook.log"
 echo "═══════════════════════════════════════════"
