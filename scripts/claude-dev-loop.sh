@@ -403,7 +403,7 @@ try:
     target = '${TASK_ID}'
     for m in ledger.get('modules', []):
         for t in m.get('tasks', []):
-            if t.get('task_id') == target and t.get('status','') in ('completed','completed_with_skip'):
+            if t.get('task_id') == target and t.get('status','') in ('completed','completed_with_skip','blocked'):
                 print('YES')
                 exit(0)
     print('NO')
@@ -456,7 +456,7 @@ try: d = json.load(open('${SESSION_STATE}')); print(d.get('phase', ''))
 except: print('')
 " 2>/dev/null || echo "")
 
-                    if [ "${SESSION_PHASE}" = "verifying" ] || [ "${SESSION_PHASE}" = "completed" ]; then
+                    if [ "${SESSION_PHASE}" = "verifying" ] || [ "${SESSION_PHASE}" = "verified" ] || [ "${SESSION_PHASE}" = "completed" ]; then
                         log_ok "implementation complete — phase changed to ${SESSION_PHASE}"
                         if [ "${SESSION_PHASE}" = "completed" ]; then
                             START_PHASE=6
@@ -465,6 +465,13 @@ except: print('')
                         fi
                         break
                     elif [ "${SESSION_PHASE}" = "blocked" ]; then
+                        log_warn "task blocked — attempting auto-evidence heal..."
+                        HEAL_OUTPUT=$(python3 "${PY_DIR}/auto_evidence.py" heal "${TASK_ID}" 2>/dev/null || echo '{}')
+                        HEAL_ACTIONS=$(echo "${HEAL_OUTPUT}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('actions_taken', [])))" 2>/dev/null || echo "0")
+                        if [ "${HEAL_ACTIONS}" -gt 0 ]; then
+                            log_ok "auto-evidence healed — retrying"
+                            continue
+                        fi
                         log_fail "task blocked — see session state for details"
                         exit 1
                     fi
@@ -687,7 +694,8 @@ except: print('error')
             if [ -f "${CI_CD_DIR}/scripts/dev-merge-guard.sh" ]; then
                 log_info "running merge guard..."
                 MERGE_OUTPUT=$(bash "${CI_CD_DIR}/scripts/dev-merge-guard.sh" \
-                    "${TARGET_REPO}" "${TASK_BRANCH}" 2>&1) || true
+                    --repo "${TARGET_REPO}" --task-branch "${TASK_BRANCH}" \
+                    --task-id "${TASK_ID}" --push 2>&1) || true
                 echo "${MERGE_OUTPUT}" >> "${LOG_FILE}"
 
                 # Extract merge commit SHA from output
