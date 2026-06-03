@@ -141,17 +141,23 @@ except: print('no_experience')
 
     if [ "${exp_status}" = "ok" ]; then
         log_watch_msg "experience system has suggestions — applying..."
-        python3 "${PY_DIR}/experience.py" _apply "${suggest_file}" 2>/dev/null || true
+
+        # Capture _apply output to check actual healing
+        local apply_output
+        apply_output=$(python3 "${PY_DIR}/experience.py" _apply "${suggest_file}" 2>/dev/null || true)
         local healed_status
-        healed_status=$(python3 -c "
-import json
-try: d = json.load(open('${suggest_file}')); print('yes' if any(s.get('confidence',0) >= 70 for s in d.get('suggestions',[])) else 'no')
-except: print('no')
-" 2>/dev/null || echo "no")
+        if echo "${apply_output}" | grep -q 'HEALED=yes' 2>/dev/null; then
+            healed_status="yes"
+        else
+            healed_status="no"
+        fi
+
         if [ "${healed_status}" = "yes" ]; then
             log_watch_msg "experience heal applied for ${log_file}"
             rm -f "${suggest_file}" 2>/dev/null || true
             return 0
+        else
+            log_watch_msg "experience heal did not succeed for ${log_file} — trying repair.py"
         fi
     fi
     rm -f "${suggest_file}" 2>/dev/null || true

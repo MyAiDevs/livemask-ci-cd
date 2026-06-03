@@ -20,6 +20,25 @@
 #   get_evidence            — read evidence from evidence chain
 #   auto_resolve_conflict   — git conflict resolver
 #   verify_repo             — repo-native build+test+vet
+#   intel_memory_search     — fuzzy memory search across all project data
+#   intel_log_analyze       — analyze log files with error triage + experience cross-ref
+#   intel_smoke_run         — run repo smoke tests (build/test/lint)
+#   intel_smoke_validate    — validate smoke test output/log
+#   intel_git_summary       — git repository summary (commits, authors, branches)
+#   intel_git_blame         — git blame analysis for a file
+#   intel_learn_search      — search technology knowledge base
+#   intel_learn_get         — get specific knowledge topic
+#   intel_learn_list        — list all knowledge topics
+#   shared_knowledge_build      — rebuild shared knowledge index (docs+github+oss+supplement)
+#   shared_knowledge_search     — search across all knowledge sources
+#   shared_knowledge_get        — get specific knowledge entry
+#   shared_knowledge_sources    — list all knowledge sources with stats
+#   shared_knowledge_sync_github — refresh GitHub issue/release data
+#   shared_knowledge_stats      — knowledge base statistics
+#   task_intake_submit          — unified task intake from any source
+#   task_intake_scan_github     — auto-detect new untracked GitHub issues
+#   task_intake_classify        — dry-run classification of a task
+#   task_intake_check_dup       — check for duplicate tasks
 
 set -euo pipefail
 
@@ -187,6 +206,142 @@ experience_stats() {
     local py="${PY_DIR}/experience.py"
     if [ -f "${py}" ]; then
         python3 "${py}" stats 2>/dev/null || echo '{"total_experiences":0}'
+    fi
+}
+
+# ── Tag System Helpers ──────────────────────────────────────────────
+
+tag_search() {
+    local query="$1"
+    local py="${PY_DIR}/tags.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" search "${query}" 2>/dev/null || echo '{"total_matches":0,"results":[]}'
+    else
+        echo '{"total_matches":0,"results":[]}'
+    fi
+}
+
+tag_item() {
+    local item_id="$1" tags="$2" source="${3:-manual}"
+    local py="${PY_DIR}/tags.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" tag "${item_id}" "${tags}" --source "${source}" 2>/dev/null || true
+    fi
+}
+
+tag_get() {
+    local item_id="$1"
+    local py="${PY_DIR}/tags.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" get "${item_id}" 2>/dev/null || echo '{"status":"not_found"}'
+    else
+        echo '{"status":"not_found"}'
+    fi
+}
+
+tag_related() {
+    local item_id="$1"
+    local py="${PY_DIR}/tags.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" related "${item_id}" 2>/dev/null || echo '{"total_related":0}'
+    else
+        echo '{"total_related":0}'
+    fi
+}
+
+tag_cross_repo() {
+    local item_id="$1"
+    local py="${PY_DIR}/tags.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" cross-repo "${item_id}" 2>/dev/null || true
+    fi
+}
+
+tag_enrich() {
+    local py="${PY_DIR}/tags.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" enrich 2>/dev/null || true
+        echo "✅ Tags enriched from ledger + contracts"
+    fi
+}
+
+# ── Task Predictor Helpers ──────────────────────────────────────────
+
+task_predict() {
+    local py="${PY_DIR}/task_predictor.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" predict --all 2>/dev/null || echo '{"total_predictions":0}'
+    else
+        echo '{"total_predictions":0}'
+    fi
+}
+
+task_suggest_for() {
+    local task_id="$1"
+    local py="${PY_DIR}/task_predictor.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" suggest-for "${task_id}" 2>/dev/null || echo '{"related_predictions":0}'
+    else
+        echo '{"related_predictions":0}'
+    fi
+}
+
+# ── Lock System Helpers ──────────────────────────────────────────
+
+lock_acquire() {
+    local scope="$1" holder="${2:-}" session="${3:-}"
+    local py="${PY_DIR}/lock.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" acquire "${scope}" \
+            ${holder:+--holder "${holder}"} \
+            ${session:+--session "${session}"} \
+            2>/dev/null || echo '{"status":"error"}'
+    else
+        echo '{"status":"error","message":"lock.py not found"}'
+    fi
+}
+
+lock_release() {
+    local scope="$1" holder="${2:-}"
+    local py="${PY_DIR}/lock.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" release "${scope}" ${holder:+--holder "${holder}"} 2>/dev/null || true
+    fi
+}
+
+lock_check() {
+    local scope="$1"
+    local py="${PY_DIR}/lock.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" check "${scope}" 2>/dev/null || echo '{"status":"free"}'
+    else
+        echo '{"status":"free"}'
+    fi
+}
+
+lock_heartbeat() {
+    local scope="$1" ttl="${2:-1800}"
+    local py="${PY_DIR}/lock.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" heartbeat "${scope}" --ttl "${ttl}" 2>/dev/null || true
+    fi
+}
+
+lock_break_stale() {
+    local prefix="${1:-}"
+    local py="${PY_DIR}/lock.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" break-stale ${prefix:+--prefix "${prefix}"} 2>/dev/null || true
+    fi
+}
+
+lock_list() {
+    local prefix="${1:-}"
+    local py="${PY_DIR}/lock.py"
+    if [ -f "${py}" ]; then
+        python3 "${py}" list ${prefix:+--prefix "${prefix}"} 2>/dev/null || echo '{"count":0}'
+    else
+        echo '{"count":0}'
     fi
 }
 
@@ -533,4 +688,138 @@ verify_repo() {
 
     echo "{\"repo\":\"${repo}\",\"status\":\"${status}\",\"build\":${build_pass},\"test\":${test_pass},\"vet\":${vet_pass}}"
     return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# dev_intel wrappers — Developer Intelligence Engine
+# ═══════════════════════════════════════════════════════════════════════
+
+# Memory: Fuzzy semantic search across tags, experience, cache, git, knowledge
+intel_memory_search() {
+    local query="$1"
+    local limit="${2:-10}"
+    shift 2 2>/dev/null || true
+    python3 "${PY_DIR}/dev_intel.py" memory search "${query}" --limit "${limit}" "$@"
+}
+
+# Log: Analyze a log file for errors, cross-reference experience
+intel_log_analyze() {
+    local log_file="$1"
+    shift 1 2>/dev/null || true
+    python3 "${PY_DIR}/dev_intel.py" log analyze "${log_file}" "$@"
+}
+
+# Smoke: Run repo validation (build/test/lint)
+intel_smoke_run() {
+    local repo="$1"
+    shift 1 2>/dev/null || true
+    python3 "${PY_DIR}/dev_intel.py" smoke run "${repo}" "$@"
+}
+
+# Smoke: Validate smoke test output log
+intel_smoke_validate() {
+    local log_file="$1"
+    shift 1 2>/dev/null || true
+    python3 "${PY_DIR}/dev_intel.py" smoke validate "${log_file}" "$@"
+}
+
+# Git: Repository summary (recent commits, branch, authors)
+intel_git_summary() {
+    local repo="${1:-}"
+    shift 1 2>/dev/null || true
+    python3 "${PY_DIR}/dev_intel.py" git summary ${repo:+--repo "${repo}"} "$@"
+}
+
+# Git: Blame analysis for a file
+intel_git_blame() {
+    local file="$1"
+    local repo="${2:-}"
+    shift 2 2>/dev/null || true
+    python3 "${PY_DIR}/dev_intel.py" git blame "${file}" ${repo:+--repo "${repo}"} "$@"
+}
+
+# Learn: Search technology knowledge base
+intel_learn_search() {
+    local query="$1"
+    shift 1 2>/dev/null || true
+    python3 "${PY_DIR}/dev_intel.py" learn search "${query}" "$@"
+}
+
+# Learn: Get a specific knowledge topic
+intel_learn_get() {
+    local topic="$1"
+    shift 1 2>/dev/null || true
+    python3 "${PY_DIR}/dev_intel.py" learn get "${topic}" "$@"
+}
+
+# Learn: List all knowledge topics
+intel_learn_list() {
+    python3 "${PY_DIR}/dev_intel.py" learn list "$@"
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# shared_knowledge wrappers — Unified Knowledge Base
+# ═══════════════════════════════════════════════════════════════════════
+
+# Build: Rebuild the full shared knowledge index
+shared_knowledge_build() {
+    python3 "${PY_DIR}/shared_knowledge.py" build "$@"
+}
+
+# Search: Search across all knowledge sources
+shared_knowledge_search() {
+    local query="$1"
+    shift 1 2>/dev/null || true
+    python3 "${PY_DIR}/shared_knowledge.py" search "${query}" "$@"
+}
+
+# Get: Retrieve a specific knowledge entry by source:id
+shared_knowledge_get() {
+    local key="$1"
+    shift 1 2>/dev/null || true
+    python3 "${PY_DIR}/shared_knowledge.py" get "${key}" "$@"
+}
+
+# Sources: List all knowledge sources with stats
+shared_knowledge_sources() {
+    python3 "${PY_DIR}/shared_knowledge.py" sources "$@"
+}
+
+# Sync GitHub: Refresh GitHub issue/release data
+shared_knowledge_sync_github() {
+    python3 "${PY_DIR}/shared_knowledge.py" sync-github "$@"
+}
+
+# Sync Upstream: Refresh upstream project references
+shared_knowledge_sync_upstream() {
+    python3 "${PY_DIR}/shared_knowledge.py" sync-upstream "$@"
+}
+
+# Stats: Show knowledge base statistics
+shared_knowledge_stats() {
+    python3 "${PY_DIR}/shared_knowledge.py" stats "$@"
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# task_intake wrappers — Unified Task Intake Gateway
+# ═══════════════════════════════════════════════════════════════════════
+
+# Submit: Create a task from any source (AI editor, GitHub, human, etc.)
+task_intake_submit() {
+    python3 "${PY_DIR}/task_intake.py" submit "$@"
+}
+
+# Scan GitHub: Auto-detect new untracked issues from all repos
+task_intake_scan_github() {
+    python3 "${PY_DIR}/task_intake.py" scan-github "$@"
+}
+
+# Classify: Dry-run classification (what would the intake produce?)
+task_intake_classify() {
+    python3 "${PY_DIR}/task_intake.py" classify "$@"
+}
+
+# Check Duplicate: Check if a task already exists with similar title
+task_intake_check_dup() {
+    python3 "${PY_DIR}/task_intake.py" check-duplicate "$@"
 }

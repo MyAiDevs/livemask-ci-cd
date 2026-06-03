@@ -6,6 +6,36 @@ DOCS_DIR="${DOCS_DIR:-/Users/sammytan/Developer/LiveMask/livemask-docs}"
 
 lark_send() { python3 "${SEND_PY}" "$1" "$2" "$3"; }
 
+# ── Main dispatcher — routes by type ────────────────────────────────────
+lark_notify() {
+  local type="${1:-}"
+  shift 1 2>/dev/null || true
+  case "${type}" in
+    cycle_start)
+      lark_notify_engine_status "$@" ;;
+    cycle_summary)
+      lark_notify_engine_status "$@" ;;
+    task_accepted)
+      lark_notify_task_accepted "$@" ;;
+    task_failed)
+      lark_notify_alert "warning" "任务失败" "$*" ;;
+    task_completed)
+      lark_notify_merge_complete "$@" ;;
+    pm_report)
+      lark_notify_pm_report "$@" ;;
+    review_result)
+      lark_notify_review_result "$@" ;;
+    qa_result)
+      lark_notify_qa_result "$@" ;;
+    monitor_insight)
+      lark_notify_monitor_insight "$@" ;;
+    alert)
+      lark_notify_alert "$@" ;;
+    *)
+      lark_send "ℹ️ LiveMask" "blue" "$*" ;;
+  esac
+}
+
 # ── Beautiful Templates ──────────────────────────────────────────────
 lark_template_menu() {
   lark_send "🤖 LiveMask 引擎" "blue" $'**欢迎使用 LiveMask 自主开发引擎**\n\n🐛  **Bug**  —  提交 Bug 报告\n📋  **需求**  —  提交新需求\n📝  **文档**  —  文档更新请求\n\n━━━━━━━━━━━━━━━━━━━\n\n📊  **MVP**  —  查看 MVP 进度\n📊  **总览**  —  项目全局报告\n📋  **任务** \\<ID\\>  —  查询任务进度\n⚙️  **状态**  —  引擎运行状态\n\n━━━━━━━━━━━━━━━━━━━\n\n💡 直接回复关键词即可交互'
