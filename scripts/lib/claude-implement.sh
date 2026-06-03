@@ -90,8 +90,6 @@ Go!"
     cd "${REPO_DIR}" || return 1
     source "${SCRIPT_DIR}/lib/claude-memory.sh" 2>/dev/null
     claude_with_memory "dev" "$(echo "$PROMPT")" "${tid}" "${repo}" "Edit,Write,Read,Bash(git *),Bash(go *),Bash(npm *),Bash(flutter *)" 2>&1
-      --dangerously-skip-permissions \
-      --allowedTools "Edit,Write,Read,Bash(git *),Bash(go *),Bash(npm *),Bash(flutter *),Bash(docker *)" 2>&1
     return $?
   else
     echo "[Claude-Impl] claude CLI not available"
