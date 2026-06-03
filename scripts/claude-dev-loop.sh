@@ -377,7 +377,11 @@ except: print('')
                 AUTO_IMPL_DETECTED=$(echo "${AUTO_IMPL_RESULT}" | head -1 | grep -c "^AUTO-IMPLEMENTABLE:" || true)
                 if [ "${AUTO_IMPL_DETECTED}" -ge 1 ]; then
                     log_info "auto-implementable task detected — running auto_implement.py..."
-                    python3 "${PY_DIR}/auto_implement.py" impl "${TASK_ID}" 2>&1 | while IFS= read -r line; do log_info "auto_impl: ${line}"; done
+                    # Use temp file to capture output (avoids subshell from pipe)
+                    AUTO_IMPL_TMP="/tmp/dev-loop-auto-impl-$$.log"
+                    python3 "${PY_DIR}/auto_implement.py" impl "${TASK_ID}" > "${AUTO_IMPL_TMP}" 2>&1 || true
+                    while IFS= read -r line; do log_info "auto_impl: ${line}"; done < "${AUTO_IMPL_TMP}"
+                    rm -f "${AUTO_IMPL_TMP}"
                     # Check if session was advanced to verifying
                     if [ -f "${SESSION_STATE}" ]; then
                         POST_PHASE=$(python3 -c "
@@ -390,8 +394,10 @@ except: print('')
                             START_PHASE=5
                         fi
                     fi
-                    # If auto_implement didn't advance, heartbeat and notify
-                    log_info "auto_implement.py finished but session not advanced — falling through to wait"
+                    # If auto_implement didn't advance, check ledger and fall through
+                    if [ "${START_PHASE:-4}" -eq 4 ]; then
+                        log_info "auto_implement.py finished but session not advanced — falling through to wait"
+                    fi
                 fi
 
                 # ── Fallback: check if task is already completed in ledger ──
