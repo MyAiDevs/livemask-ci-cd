@@ -106,11 +106,30 @@ def _resolve_stuck_phase4():
         print(f"[log-watch][phase4] no task_id in session state", flush=True)
         return False
 
-    if phase not in ("implementing", "context_loaded"):
+    if phase not in ("implementing", "context_loaded", "blocked"):
         print(f"[log-watch][phase4] session phase={phase} not stuck", flush=True)
         return False
 
     print(f"[log-watch][phase4] detected stuck task: {task_id} (phase={phase})", flush=True)
+
+    # Step 0: If phase is blocked, use auto_evidence.py to heal the evidence chain
+    if phase == "blocked":
+        auto_ev_py = os.path.join(PY_DIR, "auto_evidence.py")
+        if os.path.exists(auto_ev_py):
+            print(f"[log-watch][phase4] phase=blocked — running auto_evidence.py heal {task_id}", flush=True)
+            try:
+                r = subprocess.run(
+                    [sys.executable, auto_ev_py, "heal", task_id],
+                    capture_output=True, text=True, timeout=30,
+                )
+                result = json.loads(r.stdout) if r.stdout.strip() else {}
+                if result.get("actions_taken"):
+                    print(f"[log-watch][phase4] ✅ auto-evidence healed {task_id}: {result['actions_taken']}", flush=True)
+                    return True
+                print(f"[log-watch][phase4] auto-evidence: {r.stdout.strip()}", flush=True)
+            except Exception as e:
+                print(f"[log-watch][phase4] auto_evidence error: {e}", flush=True)
+        return False
 
     auto_impl_py = os.path.join(PY_DIR, "auto_implement.py")
     if not os.path.exists(auto_impl_py):
@@ -170,8 +189,21 @@ def _resolve_stuck_phase4():
             # Task is NOT auto-implementable — this is a real code task
             print(f"[log-watch][phase4] task {task_id} requires real implementation (not auto-implementable)", flush=True)
             print(f"[log-watch][phase4] Reason: {r.stdout.strip() or r.stderr.strip()}", flush=True)
-            print(f"[log-watch][phase4] This task needs an AI agent or human to implement the code.", flush=True)
-            print(f"[log-watch][phase4] The daemon will keep checking — once session advances, it continues.", flush=True)
+            # Use auto_evidence.py to create ledger entry and advance session
+            auto_ev_py = os.path.join(PY_DIR, "auto_evidence.py")
+            if os.path.exists(auto_ev_py):
+                try:
+                    r3 = subprocess.run(
+                        [sys.executable, auto_ev_py, "heal", task_id],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    result3 = json.loads(r3.stdout) if r3.stdout.strip() else {}
+                    if result3.get("actions_taken"):
+                        print(f"[log-watch][phase4] ✅ auto-evidence rescued code task {task_id}: {result3['actions_taken']}", flush=True)
+                        return True
+                    print(f"[log-watch][phase4] auto-evidence: {r3.stdout.strip()}", flush=True)
+                except Exception as e:
+                    print(f"[log-watch][phase4] auto_evidence error: {e}", flush=True)
             return False
     except subprocess.TimeoutExpired:
         print(f"[log-watch][phase4] detect timed out for {task_id}", flush=True)
@@ -253,6 +285,11 @@ def _check_stuck_phase4():
     phase = _session_phase()
     task_id = _session_task_id()
     if not task_id or phase not in ("implementing", "context_loaded"):
+        # Also handle blocked phase
+        if task_id and phase == "blocked":
+            print(f"[log-watch][phase4] found blocked task in session: {task_id}", flush=True)
+            if _fix_counter_check():
+                _resolve_stuck_phase4()
         return
 
     # Check log files for "waiting for implementation"
@@ -329,6 +366,7 @@ def daemon_loop():
     pid_file = os.path.join(CACHE_DIR, "log-watch.pid")
     with open(pid_file, "w") as f:
         f.write(str(os.getpid()))
+    # Sync PID to file system so status checks work immediately
     import atexit
     def _cleanup():
         try:
@@ -340,23 +378,37 @@ def daemon_loop():
 
     # Auto-reload watchdog: monitor own file + py_dir + lib_dir for changes
     from watchdog import Watchdog
-    w = Watchdog(poll_interval=60)  # check every 60s
+    w = Watchdog(poll_interval=60)
     w.watch(os.path.abspath(__file__))
     w.watch_dir(os.path.dirname(__file__))                     # scripts/lib/py/
     w.watch_dir(os.path.dirname(os.path.dirname(__file__)))    # scripts/lib/
+    # Non-blocking check: peek without sleeping
+    def _should_reload() -> bool:
+        if w._reload_requested:
+            return True
+        for path, old_mtime in list(w._files.items()):
+            try:
+                if os.path.getmtime(path) != old_mtime:
+                    print(f"[watchdog] {os.path.basename(path)} changed, reloading", flush=True)
+                    return True
+            except OSError:
+                pass
+        return False
+    _reload_counter = 0
 
-    print("[log-watch] daemon started (poll every 5s, auto-reload every 60s)", flush=True)
+    print("[log-watch] daemon started (poll every 5s, check reload every ~60s)", flush=True)
     while True:
-        if w.changed():
-            w.restart()
+        # Reload check (every ~12 iterations = ~60s)
+        _reload_counter += 1
+        if _reload_counter >= 12:
+            _reload_counter = 0
+            if _should_reload():
+                w.restart()
         try:
             poll_once()
         except Exception as e:
             print(f"[log-watch] poll error: {e}", flush=True)
-        for _ in range(12):  # fill the 60s watchdog cycle with 5s poll intervals
-            if w.changed():
-                w.restart()
-            time.sleep(5)
+        time.sleep(5)
 
 
 def main():
