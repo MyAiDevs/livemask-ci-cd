@@ -300,7 +300,9 @@ def cmd_create(args):
     tid = generate_task_id(repo, args.title)
 
     # Check if task already exists in ledger (only block on non-terminal tasks with dispatch packet)
+    # Also apply 1-hour cooldown for recently completed tasks (prevents create→complete→create loops)
     TERMINAL = {"completed", "completed_with_skip", "cancelled", "closed", "rejected"}
+    COOLDOWN_SECONDS = 3600  # 1 hour
     ledger_path = DOCS_DIR / "docs/development/task-state-ledger.json"
     if ledger_path.exists():
         ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
@@ -308,14 +310,23 @@ def cmd_create(args):
             for t in mod.get("tasks", []):
                 if t.get("task_id") == tid:
                     if t.get("status") not in TERMINAL:
-                        # Check if dispatch packet exists — if not, task is orphaned, allow recreation
                         dp_file = DISPATCH_DIR / f"{tid}.json"
                         if dp_file.exists():
                             print(json.dumps({"status": "skipped", "reason": f"task {tid} already exists (status={t.get('status')}) with dispatch packet", "task_id": tid}))
                             sys.exit(0)
-                        # No dispatch packet: orphaned task — allow recreation
                         print(json.dumps({"status": "note", "reason": f"task {tid} orphaned (no dispatch packet), allowing recreation", "task_id": tid}), file=sys.stderr)
-                    # Terminal task or orphaned task: allow recreation
+                    # Cooldown: if completed within 1 hour, skip (prevents infinite create→complete→create loop)
+                    elif t.get("status") in TERMINAL:
+                        changed = t.get("_last_status_change_at", "")
+                        if changed:
+                            try:
+                                from datetime import datetime, timezone
+                                dt = datetime.strptime(changed, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                                age = (datetime.now(timezone.utc) - dt).total_seconds()
+                                if age < COOLDOWN_SECONDS:
+                                    print(json.dumps({"status": "skipped", "reason": f"task {tid} completed {int(age)}s ago — cooldown {COOLDOWN_SECONDS}s", "task_id": tid}))
+                                    sys.exit(0)
+                            except: pass
 
     # Generate intelligence pack
     intel = create_intelligence_pack(tid, args.title, args.body, repo, args.role, args.check)

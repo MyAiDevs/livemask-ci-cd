@@ -180,8 +180,8 @@ auto_create_task() {
   # ── Shell: global TASK-AUTO cap ──
   local open_auto_count
   open_auto_count=$(python3 "${LEDGER_PY}" list --status ready 2>/dev/null | python3 -c "import json,sys; items=json.load(sys.stdin); print(sum(1 for i in items if i.get('task_id','').startswith('TASK-AUTO-')))" 2>/dev/null | tr -d '[:space:]' || echo "0")
-  if [[ "${open_auto_count:-0}" -ge 3 ]]; then
-    echo "    (skip auto-create: ${open_auto_count} open TASK-AUTO tasks already pending)"
+  if [[ "${open_auto_count:-0}" -ge 50 ]]; then
+    echo "    (skip auto-create: ${open_auto_count} open TASK-AUTO tasks already pending — cap 50)"
     return 0
   fi
 
