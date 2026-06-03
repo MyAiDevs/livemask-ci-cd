@@ -19,14 +19,17 @@ Storage: diskcache (SQLite, persistent, concurrent-safe).
 Graph engine: networkx (DiGraph, industry standard).
 
 Usage:
-    context_graph.py build <ledger_path> <contracts_path> [mvp_path]
+    context_graph.py build <ledger_path> <contracts_path> [mvp_path] [--tags PATH]
     context_graph.py query --task TASK-ID
     context_graph.py query --repo REPO
+    context_graph.py query --tag TAG
     context_graph.py query --all
     context_graph.py path --from A --to B
     context_graph.py contradictions
     context_graph.py error-stats
     context_graph.py summary
+    context_graph.py tag-tree <task_id>     # Show tag relationships around a task
+    context_graph.py tag-query <tag>         # Find all nodes with a specific tag
 """
 
 import json
@@ -113,10 +116,16 @@ def cmd_build(args: list[str]) -> int:
     ledger_path = args[0] if len(args) > 0 else ""
     contracts_path = args[1] if len(args) > 1 else ""
     mvp_path = args[2] if len(args) > 2 else ""
+    tags_path = ""
+
+    # Parse --tags flag anywhere in args
+    for i in range(len(args)):
+        if args[i] == "--tags" and i + 1 < len(args):
+            tags_path = args[i + 1]
 
     g = nx.DiGraph()
     stats = {"task_nodes": 0, "contract_nodes": 0, "repo_nodes": 0,
-             "issue_nodes": 0, "error_nodes": 0, "edges": 0, "sources_used": []}
+             "issue_nodes": 0, "error_nodes": 0, "edges": 0, "tag_nodes": 0, "sources_used": []}
 
     # Source 1: Task State Ledger
     if ledger_path and os.path.exists(ledger_path):
@@ -180,6 +189,23 @@ def cmd_build(args: list[str]) -> int:
             tid = c.get("task_id", "")
             if tid:
                 _add_edge(g, cid, tid, "defines")
+
+    # Source 2b: Business Tags (if available)
+    if tags_path and os.path.exists(tags_path):
+        stats["sources_used"].append("tags")
+        try:
+            with open(tags_path) as f:
+                tag_data = json.load(f)
+            for item_id, item in tag_data.get("items", {}).items():
+                for tag in item.get("tags", []):
+                    tag_node = f"tag:{tag}"
+                    _add_node(g, tag_node, "tag",
+                               category=tag.split(":")[0] if ":" in tag else "unknown",
+                               value=tag.split(":")[1] if ":" in tag else tag)
+                    _add_edge(g, item_id, tag_node, "tagged_with")
+                    stats["tag_nodes"] += 1
+        except Exception:
+            pass
 
     # Source 3: Experience database
     exp_path = os.path.join(CACHE_DIR, "experience", "experience.json")
@@ -527,6 +553,106 @@ def _subgraph_around(g, center_id: str, center_type: str) -> dict:
     }
 
 
+# ── Tag-aware queries ────────────────────────────────────────────────
+
+def cmd_tag_tree(args: list[str]) -> int:
+    """Show tag relationships around a specific task/entity."""
+    if not args:
+        print(json.dumps({"error": "usage: tag-tree <task_id>"}))
+        return 1
+
+    center_id = args[0]
+    g = _load_graph()
+
+    if center_id not in g:
+        print(json.dumps({"error": f"node not found in graph: {center_id}"}))
+        return 1
+
+    center_data = dict(g.nodes[center_id])
+
+    # Find all tag nodes connected to this item
+    tags = {}
+    for neighbor in g.neighbors(center_id):
+        ndata = g.nodes[neighbor]
+        if ndata.get("type") == "tag":
+            edge = g[center_id][neighbor]
+            tags[neighbor] = {"category": ndata.get("category", ""),
+                               "value": ndata.get("value", ""),
+                               "relation": edge.get("relation", "?")}
+
+    # Find other items sharing the same tags
+    tag_map = defaultdict(list)
+    for tag_node in tags:
+        for pred in g.predecessors(tag_node):
+            ndata = g.nodes[pred]
+            if pred != center_id:
+                tag_map[tag_node].append({
+                    "id": pred,
+                    "type": ndata.get("type", "?"),
+                    "status": ndata.get("status", ""),
+                    "repo": ndata.get("repo", ""),
+                })
+
+    # Check cross-repo connections
+    cross_repo_items = set()
+    for tag_node, items in tag_map.items():
+        for item in items:
+            if item.get("repo", "") != center_data.get("repo", ""):
+                cross_repo_items.add(item["id"])
+
+    print(json.dumps({
+        "center": {"id": center_id, "type": center_data.get("type", "?"), "data": center_data},
+        "tags": tags,
+        "shared_items": dict(tag_map),
+        "cross_repo_peers": sorted(cross_repo_items),
+    }, indent=2))
+    return 0
+
+
+def cmd_tag_query(args: list[str]) -> int:
+    """Find all graph nodes tagged with a specific tag."""
+    if not args:
+        print(json.dumps({"error": "usage: tag-query <tag> [--category CAT]"}))
+        return 1
+
+    tag_arg = args[0]
+    if not tag_arg.startswith("tag:"):
+        tag_arg = f"tag:{tag_arg}"
+
+    # Normalize: if it's a bare category:value, prepend tag:
+    tag_node = tag_arg if tag_arg.startswith("tag:") else f"tag:{tag_arg}"
+
+    g = _load_graph()
+
+    if tag_node not in g:
+        print(json.dumps({"status": "not_found", "tag": tag_arg}))
+        return 0
+
+    tag_data = dict(g.nodes[tag_node])
+
+    # Find which items have this tag
+    items = []
+    for pred in g.predecessors(tag_node):
+        ndata = dict(g.nodes[pred])
+        items.append({
+            "id": pred,
+            "type": ndata.get("type", "?"),
+            "status": ndata.get("status", ""),
+            "repo": ndata.get("repo", ""),
+        })
+
+    items.sort(key=lambda x: x["id"])
+
+    print(json.dumps({
+        "tag": tag_arg,
+        "category": tag_data.get("category", ""),
+        "value": tag_data.get("value", ""),
+        "item_count": len(items),
+        "items": items,
+    }, indent=2))
+    return 0
+
+
 # ── Summary ─────────────────────────────────────────────────────────
 
 def cmd_summary(args: list[str]) -> int:
@@ -559,7 +685,7 @@ def cmd_summary(args: list[str]) -> int:
 
 def main():
     if len(sys.argv) < 2:
-        cmds = ["build", "query", "path", "contradictions", "error-stats", "summary"]
+        cmds = ["build", "query", "path", "contradictions", "error-stats", "summary", "tag-tree", "tag-query"]
         print(json.dumps({"error": f"usage: context_graph.py <{'|'.join(cmds)}> [...]"}))
         sys.exit(1)
 
@@ -573,6 +699,8 @@ def main():
         "contradictions": cmd_contradictions,
         "error-stats": cmd_error_stats,
         "summary": cmd_summary,
+        "tag-tree": cmd_tag_tree,
+        "tag-query": cmd_tag_query,
     }
 
     if command not in cmds:

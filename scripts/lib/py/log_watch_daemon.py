@@ -86,48 +86,59 @@ def _auto_repair(logfile: str, new_lines: str):
 
     # 1. Try experience.suggest + _apply
     suggest_file = f"/tmp/log-watch-suggest-{os.getpid()}.json"
+    applied = False
     try:
-        subprocess.run(
+        r = subprocess.run(
             [sys.executable, os.path.join(PY_DIR, "experience.py"), "suggest", logfile],
             capture_output=True, timeout=30,
         )
-    except Exception:
-        pass
+        # BUG FIX: write stdout to suggest_file so _apply can read it
+        if r.returncode == 0 and r.stdout.strip():
+            with open(suggest_file, "w") as sf:
+                sf.write(r.stdout.decode() if isinstance(r.stdout, bytes) else r.stdout)
+    except Exception as e:
+        print(f"[log-watch] experience.suggest error: {e}", flush=True)
 
     if os.path.exists(suggest_file):
         try:
             with open(suggest_file) as f:
                 suggest_data = json.load(f)
-            if suggest_data.get("status") == "ok":
-                print(f"[log-watch] experience has suggestions for {logfile}", flush=True)
-                subprocess.run(
+            if suggest_data.get("status") == "ok" and suggest_data.get("suggestions"):
+                print(f"[log-watch] experience has {len(suggest_data['suggestions'])} suggestions for {logfile}", flush=True)
+                apply_r = subprocess.run(
                     [sys.executable, os.path.join(PY_DIR, "experience.py"), "_apply", suggest_file],
-                    capture_output=True, timeout=60,
+                    capture_output=True, text=True, timeout=60,
                 )
-        except (json.JSONDecodeError, subprocess.TimeoutExpired):
-            pass
+                # Record whether the apply healed or not
+                healed = "HEALED=yes" in apply_r.stdout
+                print(f"[log-watch] experience._apply {'healed' if healed else 'did not heal'} {logfile}", flush=True)
+                if healed:
+                    applied = True
+        except (json.JSONDecodeError, subprocess.TimeoutExpired) as e:
+            print(f"[log-watch] experience._apply error: {e}", flush=True)
         try:
             os.unlink(suggest_file)
         except OSError:
             pass
 
-    # 2. Fall back to repair.py --apply
-    try:
-        r = subprocess.run(
-            [sys.executable, os.path.join(PY_DIR, "repair.py"), "build", logfile, "--apply"],
-            capture_output=True, text=True, timeout=120,
-        )
-        status = "?"
+    # 2. If experience didn't heal, fall back to repair.py --apply
+    if not applied:
         try:
-            result = json.loads(r.stdout)
-            status = result.get("status", "?")
-        except json.JSONDecodeError:
-            status = "parse_error"
-        print(f"[log-watch] repair.py status={status} for {logfile}", flush=True)
-    except subprocess.TimeoutExpired:
-        print(f"[log-watch] repair.py timed out for {logfile}", flush=True)
-    except Exception as e:
-        print(f"[log-watch] repair.py error: {e}", flush=True)
+            r = subprocess.run(
+                [sys.executable, os.path.join(PY_DIR, "repair.py"), "build", logfile, "--apply"],
+                capture_output=True, text=True, timeout=120,
+            )
+            status = "?"
+            try:
+                result = json.loads(r.stdout)
+                status = result.get("status", "?")
+            except json.JSONDecodeError:
+                status = "parse_error"
+            print(f"[log-watch] repair.py status={status} for {logfile}", flush=True)
+        except subprocess.TimeoutExpired:
+            print(f"[log-watch] repair.py timed out for {logfile}", flush=True)
+        except Exception as e:
+            print(f"[log-watch] repair.py error: {e}", flush=True)
 
 
 def poll_once():
