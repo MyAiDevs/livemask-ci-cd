@@ -88,8 +88,8 @@ log_setup() {
     # Use a simple fd-based approach instead of process substitution
     # to avoid set -e / pipefail issues
     exec 3>&1 4>&2
+    exec 1> >(tee -a "${LOG_FILE}" >&3)
     # Redirect ALL output to log file only. No tee, no double output.
-    exec >> "${LOG_FILE}" 2>&1
 
     # Create/update latest symlink
     ln -sf "$(basename "${LOG_FILE}")" "${LOG_LATEST}" 2>/dev/null || true
