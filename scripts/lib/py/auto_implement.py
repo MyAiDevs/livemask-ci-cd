@@ -97,8 +97,17 @@ def find_contract(tdoc, link):
 def extract_link(tdoc):
     if not os.path.exists(tdoc): return ""
     with open(tdoc) as f: c = f.read()
+    # Try markdown [text](path) format first
     m = re.search(r"\[.*?\]\(([^)]+\.md)\)", c)
-    return m.group(1) if m else ""
+    if m: return m.group(1)
+    # Fallback: backtick-wrapped contract paths like `docs/contracts/.../foo.md`
+    # Match patterns: `path/to/file.md`, `docs/contracts/.../file.md`
+    m = re.search(r"`((?:docs/)?contracts/[^`]+\.md)`", c)
+    if m: return m.group(1)
+    # Also match `Contract: path` or similar patterns
+    m = re.search(r"Contract[:\s]+`([^`]+\.md)`", c)
+    if m: return m.group(1)
+    return ""
 
 def contract_criteria(cpath):
     if not os.path.exists(cpath): return []

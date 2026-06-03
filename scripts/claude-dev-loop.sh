@@ -90,6 +90,12 @@ while true; do
         # ── Build shared knowledge base (cached, fast) ────────────────
         python3 "${PY_DIR}/shared_knowledge.py" build --skip-github 2>/dev/null || true
 
+        # ── Ensure log-watch daemon is running as safety net ──────────
+        if ! bash "${CI_CD_DIR}/scripts/lib/log-watch.sh" status >/dev/null 2>&1; then
+            bash "${CI_CD_DIR}/scripts/lib/log-watch.sh" start >/dev/null 2>&1 || true
+            log_info "log-watch daemon started (auto)"
+        fi
+
         # Check if we're resuming a session
         if [ "${CLAUDE_RESUME:-false}" = "true" ]; then
             RESUME_TASK="${CLAUDE_TASK_ID:-}"
@@ -379,6 +385,29 @@ except: print('')
                     fi
                     # If auto_implement didn't advance, heartbeat and notify
                     log_info "auto_implement.py finished but session not advanced — falling through to wait"
+                fi
+
+                # ── Fallback: check if task is already completed in ledger ──
+                if [ "${START_PHASE:-4}" -eq 4 ]; then
+                    LEDGER_DONE=$(python3 -c "
+import json
+try:
+    ledger = json.load(open('${DOCS_DIR}/docs/development/task-state-ledger.json'))
+    target = '${TASK_ID}'
+    for m in ledger.get('modules', []):
+        for t in m.get('tasks', []):
+            if t.get('task_id') == target and t.get('status','') in ('completed','completed_with_skip'):
+                print('YES')
+                exit(0)
+    print('NO')
+except: print('NO')
+" 2>/dev/null)
+                    if [ "${LEDGER_DONE}" = "YES" ]; then
+                        log_ok "task already completed in ledger — advancing session to verifying"
+                        python3 "${PY_DIR}/session.py" save "${TASK_ID}" "verifying" \
+                            --branch "task/${TASK_ID}" 2>/dev/null || true
+                        START_PHASE=5
+                    fi
                 fi
             fi
 
