@@ -301,6 +301,33 @@ except: pass
                 log_info "planner found no new gaps either"
             fi
 
+            # ─── Claude-powered task orchestration when idle ────────────
+            log_info "BRAIN: invoking Claude to analyze MVP docs and create tasks..."
+            if command -v claude &>/dev/null; then
+              CLAUDE_TASKS=$(claude_analyze_docs 2>/dev/null || echo "[]")
+              TASK_COUNT=$(echo "${CLAUDE_TASKS}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d))" 2>/dev/null || echo "0")
+              if [ "${TASK_COUNT}" -gt 0 ]; then
+                log_ok "Claude created ${TASK_COUNT} intelligent tasks — dispatching..."
+                echo "${CLAUDE_TASKS}" | python3 -c "
+import json,sys,os,time
+from datetime import datetime,timezone
+tasks=json.load(sys.stdin)
+now=datetime.now(timezone.utc)
+for t in tasks:
+    tid=t.get('task_id','TASK-MVP-'+str(int(time.time())))
+    dp={'schema_version':1,'task_id':tid,'repo':t.get('repo','livemask-docs'),'priority':t.get('priority','P1'),'readiness':'ready','assigned_to':'claude','assigned_at':now.strftime('%Y-%m-%dT%H:%M:%SZ'),'assigned_by':'claude-brain','reason':t.get('description','Intelligent task')[:80],'context':{'task_doc':f'docs/development/tasks/{tid}.md'},'acceptance':{'evidence_required':True}}
+    dp_dir='/Users/sammytan/Developer/LiveMask/livemask-docs/docs/development/dispatch-packets'
+    os.makedirs(dp_dir,exist_ok=True)
+    json.dump(dp,open(f'{dp_dir}/{tid}.json','w'),indent=2)
+    print(f'  Created: {tid} → {t.get(\"repo\")}')
+" 2>/dev/null
+                # Re-run dispatch to pick up new tasks
+                START_PHASE=2
+                continue
+              fi
+            fi
+            log_info "BRAIN: no new tasks from Claude analysis either"
+
             # ─── Still nothing — sleep and retry ─────────────────────────
             if [ "${SINGLE_SHOT}" = true ]; then
                 log_info "single-shot mode — nothing to do, exiting"
@@ -423,8 +450,10 @@ except: print('')
                 log_ok "auto-evidence healed ${HEAL_CNT} issue(s) — proceeding to Phase 5"
                 START_PHASE=5
             else
-                log_fail "task blocked — auto-evidence could not heal"
-                exit 1
+                log_warn "task blocked — auto-evidence could not heal, skipping to next cycle"
+                START_PHASE=1
+                unset TASK_ID TARGET_REPO
+                continue
             fi
         else
             # Only overwrite if no meaningful progress detected
