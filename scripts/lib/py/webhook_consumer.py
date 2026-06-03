@@ -114,11 +114,21 @@ def cmd_process():
 
 
 def cmd_daemon():
-    print(f"[consumer] daemon start — poll {INBOX_FILE}", flush=True)
+    from watchdog import Watchdog
+    w = Watchdog(poll_interval=60)
+    w.watch(os.path.abspath(__file__))
+    w.watch_dir(os.path.dirname(__file__))  # scripts/lib/py/
+    w.watch_dir(os.path.dirname(os.path.dirname(__file__)))  # scripts/lib/
+    print(f"[consumer] daemon start — poll {INBOX_FILE}, auto-reload every 60s", flush=True)
     while True:
+        if w.changed():
+            w.restart()
         try: cmd_process()
         except Exception as e: print(f"[consumer] daemon error: {e}", flush=True)
-        time.sleep(5)
+        for _ in range(12):
+            if w.changed():
+                w.restart()
+            time.sleep(5)
 
 
 def cmd_status():
