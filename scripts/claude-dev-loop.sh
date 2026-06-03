@@ -34,7 +34,7 @@ source "${SCRIPT_DIR}/lib/claude-implement.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/lib/claude-qa.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/lib/claude-brain.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/lib/claude-memory.sh" 2>/dev/null || true# ---- Constants ----
-LIVEMASK_ROOT="${LIVEMASK_ROOT:-/Users/sammytan/Developer/LiveMask}"
+source "${SCRIPT_DIR}/lib/claude-webhook.sh" 2>/dev/null || trueLIVEMASK_ROOT="${LIVEMASK_ROOT:-/Users/sammytan/Developer/LiveMask}"
 CI_CD_DIR="${LIVEMASK_ROOT}/livemask-ci-cd"
 DOCS_DIR="${LIVEMASK_ROOT}/livemask-docs"
 PY_DIR="${CI_CD_DIR}/scripts/lib/py"
@@ -86,6 +86,38 @@ while true; do
         python3 "${PY_DIR}/lock.py" break-stale --prefix "task:" 2>/dev/null || true
         python3 "${PY_DIR}/lock.py" break-stale --prefix "repo:" 2>/dev/null || true
         log_info "stale locks cleaned up"
+        # ── Self-heal: detect and fix lock starvation ──
+        READY_COUNT=$(python3 -c "
+import json
+l=json.load(open('${LEDGER}'))
+print(sum(1 for m in l.get('modules',[]) for t in m.get('tasks',[]) if t.get('status')=='ready'))
+" 2>/dev/null || echo "0")
+        if [ "${READY_COUNT}" -gt 0 ]; then
+            LOCKED_COUNT=$(python3 -c "
+import json,subprocess,os
+l=json.load(open('${LEDGER}'))
+locked=0
+for m in l.get('modules',[]):
+    for t in m.get('tasks',[]):
+        if t.get('status')=='ready':
+            tid=t.get('task_id','')
+            dp='/Users/sammytan/Developer/LiveMask/livemask-docs/docs/development/dispatch-packets/'+tid+'.json'
+            if os.path.exists(dp):
+                r=subprocess.run(['python3','${PY_DIR}/lock.py','check',f'task:{tid}'],capture_output=True,text=True)
+                try:
+                    if json.loads(r.stdout).get('status')=='locked': locked+=1
+                except: pass
+    print(locked)
+" 2>/dev/null || echo "0")
+            if [ "${LOCKED_COUNT}" -gt 0 ]; then
+                log_warn "self-heal: ${LOCKED_COUNT}/${READY_COUNT} ready tasks are locked — force releasing..."
+                for scope in $(python3 "${PY_DIR}/lock.py" list 2>/dev/null | python3 -c "import json,sys; [print(l['scope']) for l in json.load(sys.stdin)]" 2>/dev/null); do
+                    python3 "${PY_DIR}/lock.py" release "$scope" 2>/dev/null
+                done
+                log_ok "self-heal: all locks released"
+            fi
+        fi
+
 
         # ── Enrich tags from ledger/contracts on each startup ─────────
         python3 "${PY_DIR}/tags.py" enrich 2>/dev/null || true
