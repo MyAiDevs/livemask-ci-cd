@@ -33,8 +33,11 @@ source "${SCRIPT_DIR}/lib/claude-repair.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/lib/claude-implement.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/lib/claude-qa.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/lib/claude-brain.sh" 2>/dev/null || true
-source "${SCRIPT_DIR}/lib/claude-memory.sh" 2>/dev/null || true# ---- Constants ----
-source "${SCRIPT_DIR}/lib/claude-webhook.sh" 2>/dev/null || trueLIVEMASK_ROOT="${LIVEMASK_ROOT:-/Users/sammytan/Developer/LiveMask}"
+source "${SCRIPT_DIR}/lib/claude-memory.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/lib/claude-webhook.sh" 2>/dev/null || true
+
+# ---- Constants ----
+LIVEMASK_ROOT="${LIVEMASK_ROOT:-/Users/sammytan/Developer/LiveMask}"
 CI_CD_DIR="${LIVEMASK_ROOT}/livemask-ci-cd"
 DOCS_DIR="${LIVEMASK_ROOT}/livemask-docs"
 PY_DIR="${CI_CD_DIR}/scripts/lib/py"
@@ -78,9 +81,7 @@ while true; do
         CURRENT_PHASE="startup"
         log_phase "1" "System Check"
 
-        if ! bash "${CI_CD_DIR}/scripts/claude-startup.sh" 2>&1 | tee -a "${LOG_FILE}" | grep -v "^==" | head -5; then
-            log_warn "startup check had warnings — continuing"
-        fi
+        bash "${CI_CD_DIR}/scripts/claude-startup.sh" >> "${LOG_FILE}" 2>&1 || true
 
         # ── Break stale locks from previous sessions ──────────────────
         python3 "${PY_DIR}/lock.py" break-stale --prefix "task:" 2>/dev/null || true
