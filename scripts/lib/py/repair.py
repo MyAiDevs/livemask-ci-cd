@@ -251,9 +251,8 @@ def cmd_build(args: list[str]) -> int:
         if args[i] == "--apply":
             apply_mode = True
         elif args[i] == "--repo" and i + 1 < len(args):
-            repo = args[i + 1]; apply_mode = repo == "True" or repo == "apply" or repo == "build"
-            repo = repo if repo in ("apply", "build") and i < len(args) - 1 else repo
-        elif not log_path:
+            repo = args[i + 1]
+        elif not log_path and not args[i].startswith("--"):
             log_path = args[i]
 
     if not log_path:
@@ -329,6 +328,25 @@ def cmd_build(args: list[str]) -> int:
         result["status"] = "fixed" if any(
             fr.get("exit_code") == 0 for fr in fix_results
         ) else "retry"
+
+        # Record to experience system for self-learning loop
+        exp_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "experience.py")
+        if result["status"] == "fixed":
+            action_json = json.dumps({"type": "repair_build", "findings": len(findings), "fixes": len(fixes)})
+            subprocess.run(
+                [sys.executable, exp_script, "record", log_path, action_json, "1",
+                 "--repo", repo],
+                capture_output=True, timeout=10,
+            )
+        elif result["fix_results"]:
+            for fr in fix_results:
+                success = 1 if fr.get("exit_code") == 0 else 0
+                action_json = json.dumps({"type": "run", "cmd": fr.get("command", "")})
+                subprocess.run(
+                    [sys.executable, exp_script, "record", log_path, action_json, str(success),
+                     "--repo", repo],
+                    capture_output=True, timeout=10,
+                )
 
     # Save to repair history
     _save_to_history(log_path, result)
@@ -467,9 +485,9 @@ def _save_to_history(log_path: str, result: dict):
 # ── Main ─────────────────────────────────────────────────────────────
 
 def main():
-    if len(sys.argv) < 2:
-        print(json.dumps({"error": "usage: repair.py <build|edit|classify|stats> [...]"}))
-        sys.exit(1)
+    if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
+        print(__doc__)
+        return 0 if sys.argv[1:2] in (["--help"], ["-h"]) else 1
 
     command = sys.argv[1]
     args = sys.argv[2:]

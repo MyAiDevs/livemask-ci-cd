@@ -55,6 +55,13 @@ PY_TOOLS=(
     "${PY_DIR}/self_review.py"
     "${PY_DIR}/context.py"
     "${PY_DIR}/dispatch.py"
+    "${PY_DIR}/task_intake.py"
+    "${PY_DIR}/shared_knowledge.py"
+    "${PY_DIR}/lock.py"
+    "${PY_DIR}/tags.py"
+    "${PY_DIR}/dev_intel.py"
+    "${PY_DIR}/knowledge_base.py"
+    "${PY_DIR}/log_watch_daemon.py"
 )
 
 PY_ERRORS=0

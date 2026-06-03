@@ -31,13 +31,14 @@ import os
 import re
 import subprocess
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
 
 # ── Constants ──────────────────────────────────────────────────────────────
 REPO_PREFIX = "MyAiDevs"
 DEFAULT_ROOT = os.path.expanduser("~/Developer/LiveMask")
+CACHE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "cache")
 
 # ── Evidence Chain keys ───────────────────────────────────────────────────
 EVIDENCE_FIELDS = ["dev_merge_commit", "remote_dev_ref", "validation", "issue"]
@@ -402,6 +403,87 @@ def analyze_gaps(contract_path: str, mvp_path: str, ledger_path: str,
     # Sort by priority
     gaps.sort(key=lambda x: (-x.get("priority_score", 0), x.get("task_id", "")))
 
+    # ── NEW: Enrich gaps with tags ──────────────────────────────────────
+    try:
+        tags_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tags.py")
+        # Auto-tag each gap
+        for gap in gaps:
+            tid = gap["task_id"]
+            context = " ".join(filter(None, [
+                tid, gap.get("reason", ""), gap.get("domain", ""),
+                gap.get("contract_name", ""), gap.get("section", ""),
+                gap.get("target", ""), gap.get("deps", ""),
+            ]))
+            # Call tags.py to extract tags
+            r = subprocess.run(
+                [sys.executable, tags_script, "search", context[:500], "--limit", "1"],
+                capture_output=True, text=True, timeout=5,
+            )
+            # Also run auto-tag inline
+            tags_dir = os.path.dirname(os.path.abspath(__file__))
+            sys.path.insert(0, tags_dir)
+            from tags import _auto_tag_text as auto_tag
+            auto_tags = auto_tag(context)
+            gap["auto_tags"] = auto_tags
+
+        # Build related_tasks for each gap based on shared tags
+        for gap in gaps:
+            my_tags = set(gap.get("auto_tags", []))
+            related = []
+            for other in gaps:
+                if other["task_id"] == gap["task_id"]:
+                    continue
+                other_tags = set(other.get("auto_tags", []))
+                shared = my_tags & other_tags
+                if shared:
+                    related.append({
+                        "task_id": other["task_id"],
+                        "shared_tags": sorted(shared),
+                        "shared_count": len(shared),
+                    })
+            related.sort(key=lambda x: -x["shared_count"])
+            gap["related_tasks"] = related[:5]
+    except Exception as e:
+        for gap in gaps:
+            gap.setdefault("auto_tags", [])
+            gap.setdefault("related_tasks", [])
+
+    # ── NEW: Integrate task predictions ─────────────────────────────────
+    try:
+        predictor_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "task_predictor.py")
+        r = subprocess.run(
+            [sys.executable, predictor_script, "predict",
+             "--ledger", ledger_path,
+             "--contracts", contract_path,
+             "--mvp", mvp_path,
+             "--tags", os.path.join(CACHE_DIR, "business-tags.json")],
+            capture_output=True, text=True, timeout=15,
+        )
+        if r.returncode == 0:
+            predictions = json.loads(r.stdout)
+            for gap in gaps:
+                tid = gap["task_id"]
+                implied = []
+                for p in predictions.get("predictions", []):
+                    p_json = json.dumps(p)
+                    if tid in p_json:
+                        implied.append(p)
+                gap["implied_tasks"] = implied[:3]
+
+                # Also suggest successor tasks
+                if not implied and tid.startswith("TASK-"):
+                    for p in predictions.get("predictions", []):
+                        if p.get("trigger_task") == tid or \
+                           p.get("missing_repo", "") in " ".join(gap.get("repos", [])):
+                            implied.append(p)
+                gap["implied_tasks"] = implied[:3]
+        else:
+            for gap in gaps:
+                gap["implied_tasks"] = []
+    except Exception:
+        for gap in gaps:
+            gap["implied_tasks"] = []
+
     # Cross-reference against GitHub issues
     gh_stats = {}
     if sync_gh and _gh_available():
@@ -436,6 +518,8 @@ def analyze_gaps(contract_path: str, mvp_path: str, ledger_path: str,
         "total_mvp_rows": len(mvp_tasks),
         "gaps_found": len(gaps),
         "gaps": gaps,
+        "related_task_count": sum(1 for g in gaps if g.get("related_tasks")),
+        "implied_task_count": sum(1 for g in gaps if g.get("implied_tasks")),
         "github": gh_stats,
     }
 
@@ -504,6 +588,35 @@ def format_markdown(plan: dict) -> str:
         reason = g.get("reason", "")[:70]
         lines.append(f"| {i} | `{tid}` | {src} | {score} | {repos} | {has_doc} | {gh_issue} | {reason} |")
 
+    # Add tag summary section
+    tags_flat = []
+    for g in plan["gaps"]:
+        for tag in g.get("auto_tags", []):
+            tags_flat.append(tag)
+    if tags_flat:
+        from collections import Counter
+        tag_counts = Counter(tags_flat)
+        lines += ["", "## Tags & Cross-Repo Relations", "",
+                   "| Tag | Count |", "|-----|-------|"]
+        for tag, count in tag_counts.most_common(15):
+            lines.append(f"| `{tag}` | {count} |")
+
+    # Add prediction summary
+    predicted = sum(1 for g in plan["gaps"] if g.get("implied_tasks"))
+    if predicted:
+        lines += ["", "## Task Predictions (Implied Tasks)", "",
+                   f"**{predicted}** gaps have implied/prophecy tasks.",
+                   ""]
+        for g in plan["gaps"]:
+            if g.get("implied_tasks"):
+                lines.append(f"- `{g['task_id']}`: {len(g['implied_tasks'])} implied task(s)")
+
+    # Add related tasks section
+    related_count = sum(1 for g in plan["gaps"] if g.get("related_tasks"))
+    if related_count:
+        lines += ["", "## Multi-Task Relations", "",
+                   f"**{related_count}** gaps have related tasks via shared tags.", ""]
+
     lines.append("")
     return "\n".join(lines)
 
@@ -517,6 +630,34 @@ def create_task_doc(gap: dict, tasks_dir: str) -> str:
     reason = gap.get("reason", "Auto-discovered by planner.py")
     source = gap.get("source", "planner")
 
+    # Build tags section
+    auto_tags = gap.get("auto_tags", [])
+    tags_section = "\n".join(f"  - `{t}`" for t in auto_tags) if auto_tags else "  - _auto-tag pending_"
+
+    # Build related tasks section
+    related = gap.get("related_tasks", [])
+    related_section = ""
+    if related:
+        related_section = "\n".join(
+            f"  - `{r['task_id']}` — {r['shared_count']} shared tag(s): {', '.join(f'`{t}`' for t in r['shared_tags'][:3])}"
+            for r in related)
+    else:
+        related_section = "  - _none yet_"
+
+    # Build implied tasks section
+    implied = gap.get("implied_tasks", [])
+    implied_section = ""
+    if implied:
+        implied_items = []
+        for p in implied:
+            strat = p.get("strategy", "?")
+            conf = p.get("confidence", 0)
+            reason_p = p.get("reason", "")[:80]
+            implied_items.append(f"  - [{strat}] (confidence: {conf}) — {reason_p}")
+        implied_section = "\n".join(implied_items)
+    else:
+        implied_section = "  - _no predictions yet_"
+
     content = f"""# {tid} — Auto-discovered Task
 
 - **Status**: ready
@@ -529,7 +670,19 @@ def create_task_doc(gap: dict, tasks_dir: str) -> str:
 
 {reason}
 
-## 2. Scope
+## 2. Business Tags
+
+{tags_section}
+
+## 3. Multi-Task Relations
+
+{related_section}
+
+## 4. Task Predictions (Prophecy)
+
+{implied_section}
+
+## 5. Scope
 
 ### In Scope
 - [ ] TBD
@@ -537,15 +690,15 @@ def create_task_doc(gap: dict, tasks_dir: str) -> str:
 ### Out of Scope
 - [ ] TBD
 
-## 3. Acceptance Criteria
+## 6. Acceptance Criteria
 
 - [ ] TBD
 
-## 4. Technical Notes
+## 7. Technical Notes
 
 _To be filled during implementation._
 
-## 5. Validation
+## 8. Validation
 
 - [ ] Build pass
 - [ ] Test pass
@@ -593,6 +746,8 @@ def create_dispatch_packets(plan: dict, packet_dir: str,
             "reason": gap.get("reason", ""),
             "priority": gap.get("priority_score", 50),
             "status": "dispatch_packet",
+            "auto_tags": gap.get("auto_tags", []),
+            "related_tasks": [r["task_id"] for r in gap.get("related_tasks", [])][:5],
         }
 
         fname = f"{tid}-planner-generated.json"
@@ -602,15 +757,58 @@ def create_dispatch_packets(plan: dict, packet_dir: str,
 
         entry = {"file": fpath, "task_id": tid, "repo": repo}
 
+        # ── Write auto_tags to tags.py system for cross-repo discovery ──
+        auto_tags = gap.get("auto_tags", [])
+        if auto_tags:
+            try:
+                tags_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tags.py")
+                tag_str = ",".join(auto_tags)
+                subprocess.run(
+                    [sys.executable, tags_script, "tag", tid, tag_str,
+                     "--source", "planner", "--meta", f"repo:{repo}"],
+                    capture_output=True, timeout=5,
+                )
+            except Exception:
+                pass
+
         # Optionally create GitHub issue
         if create_gh_issues and repo and _gh_available():
             gh_repo = f"{REPO_PREFIX}/{repo}"
+
+            # Build rich issue body with tags + relations + predictions
+            auto_tags = gap.get("auto_tags", [])
+            tags_lines = "\n".join(f"  - `{t}`" for t in auto_tags) if auto_tags else "  - _auto-tag pending_"
+
+            related = gap.get("related_tasks", [])
+            related_lines = ""
+            if related:
+                related_lines = "\n".join(
+                    f"  - `{r['task_id']}` — {r['shared_count']} shared tag(s)"
+                    for r in related[:5])
+            else:
+                related_lines = "  - _none_"
+
+            implied = gap.get("implied_tasks", [])
+            implied_lines = ""
+            if implied:
+                implied_lines = "\n".join(
+                    f"  - `{p.get('strategy','?')}` (confidence: {p.get('confidence',0)}) — {p.get('reason','')[:60]}"
+                    for p in implied[:3])
+            else:
+                implied_lines = "  - _no predictions yet_"
+
             title = f"[{tid}] Auto-discovered: {gap.get('reason', 'Implementation')}"
             body = (
                 f"## {tid}\n\n"
                 f"**Source**: {gap.get('source', 'planner')}\n"
                 f"**Priority**: {gap.get('priority_score', 50)}\n"
                 f"**Reason**: {gap.get('reason', '')}\n\n"
+                f"### Business Tags\n"
+                f"{tags_lines}\n\n"
+                f"### Multi-Task Relations\n"
+                f"{related_lines}\n\n"
+                f"### Task Predictions (Prophecy)\n"
+                f"{implied_lines}\n\n"
                 f"---\n\n"
                 f"### Acceptance Criteria\n"
                 f"- [ ] TBD\n\n"
@@ -623,11 +821,20 @@ def create_dispatch_packets(plan: dict, packet_dir: str,
                 f"| issue | `pending` |\n\n"
                 f"_Auto-created by planner.py_"
             )
+
+            # Build GitHub labels from auto_tags (strip prefix for github)
+            gh_labels = ["auto"]
+            for t in auto_tags:
+                # Use short form: "domain:auth" → "domain-auth"
+                gh_label = t.replace(":", "-")[:40]
+                if gh_label not in gh_labels:
+                    gh_labels.append(gh_label)
+
             r = _run_gh(["issue", "create",
                           "--repo", gh_repo,
                           "--title", title,
                           "--body", body,
-                          "--label", "auto"])
+                          "--label", ",".join(gh_labels)])
             if r.returncode == 0:
                 issue_url = r.stdout.strip()
                 entry["issue_url"] = issue_url

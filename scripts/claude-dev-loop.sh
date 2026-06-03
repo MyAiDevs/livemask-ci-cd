@@ -75,6 +75,21 @@ while true; do
             log_warn "startup check had warnings — continuing"
         fi
 
+        # ── Break stale locks from previous sessions ──────────────────
+        python3 "${PY_DIR}/lock.py" break-stale --prefix "task:" 2>/dev/null || true
+        python3 "${PY_DIR}/lock.py" break-stale --prefix "repo:" 2>/dev/null || true
+        log_info "stale locks cleaned up"
+
+        # ── Enrich tags from ledger/contracts on each startup ─────────
+        python3 "${PY_DIR}/tags.py" enrich 2>/dev/null || true
+
+        # ── Scan GitHub for new untracked issues ──────────────────────
+        log_info "scanning GitHub for new issues..."
+        python3 "${PY_DIR}/task_intake.py" scan-github 2>/dev/null || log_info "GitHub scan skipped (gh CLI unavailable or no new issues)"
+
+        # ── Build shared knowledge base (cached, fast) ────────────────
+        python3 "${PY_DIR}/shared_knowledge.py" build --skip-github 2>/dev/null || true
+
         # Check if we're resuming a session
         if [ "${CLAUDE_RESUME:-false}" = "true" ]; then
             RESUME_TASK="${CLAUDE_TASK_ID:-}"
@@ -126,6 +141,50 @@ import sys, json
 try: d = json.load(sys.stdin); print(d.get('source', '?'))
 except: print('?')
 " 2>/dev/null || echo "?")"
+
+            # ── Acquire task lock ──────────────────────────────────
+            LOCK_TMPFILE="/tmp/dev-loop-lock-$$.json"
+            python3 "${PY_DIR}/lock.py" acquire "task:${TASK_ID}" \
+                --ttl 3600 --session "cycle-${CYCLE_NUM}" 2>/dev/null \
+                > "${LOCK_TMPFILE}" || true  # capture exit code but keep stdout
+            LOCK_STATUS=$(python3 -c "
+import json
+try: d = json.load(open('${LOCK_TMPFILE}')); print(d.get('status', 'error'))
+except: print('read_error')
+" 2>/dev/null || echo "parse_error")
+            rm -f "${LOCK_TMPFILE}"
+
+            if [ "${LOCK_STATUS}" = "locked" ]; then
+                # Re-read the lock file to get holder info
+                LOCK_INFO=$(python3 "${PY_DIR}/lock.py" check "task:${TASK_ID}" 2>/dev/null || echo '{"holder":"?"}')
+                LOCK_HOLDER=$(echo "${LOCK_INFO}" | python3 -c "
+import sys, json
+try: d = json.load(sys.stdin); print(d.get('holder', '?'))
+except: print('?')
+" 2>/dev/null || echo "?")
+                log_warn "task ${TASK_ID} is locked by ${LOCK_HOLDER} — skipping"
+                START_PHASE=1
+                unset TASK_ID TARGET_REPO
+                continue
+            elif [ "${LOCK_STATUS}" = "acquired" ]; then
+                log_ok "task lock acquired: task:${TASK_ID}"
+
+                # Also acquire repo lock
+                if [ -n "${TARGET_REPO}" ]; then
+                    REPO_LOCK_OUT=$(python3 "${PY_DIR}/lock.py" acquire "repo:${TARGET_REPO}" \
+                        --ttl 3600 --session "cycle-${CYCLE_NUM}" 2>/dev/null || echo '{"status":"error"}')
+                    REPO_LOCK_STATUS=$(echo "${REPO_LOCK_OUT}" | python3 -c "
+import sys, json
+try: d = json.load(sys.stdin); print(d.get('status', 'error'))
+except: print('parse_error')
+" 2>/dev/null || echo "parse_error")
+                    if [ "${REPO_LOCK_STATUS}" != "acquired" ]; then
+                        log_warn "repo lock status: ${REPO_LOCK_STATUS} — continuing without repo lock"
+                    fi
+                fi
+            else
+                log_warn "lock acquire returned status '${LOCK_STATUS}' — continuing without lock"
+            fi
 
             lark_notify "task_accepted" "${TASK_ID}" "${TARGET_REPO}"
 
@@ -334,6 +393,27 @@ except: print('')
             if [ $((WAIT_COUNT % 10)) -eq 0 ]; then
                 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '?')] cycle=${CYCLE_NUM} still waiting for implementation (${WAIT_COUNT} checks so far)" >> "${LOG_FILE}"
                 log_info "still waiting... (${WAIT_COUNT}/120 checks)"
+
+                # Heartbeat the lock every 5 min to prevent stale expiry
+                if [ -n "${TASK_ID:-}" ]; then
+                    python3 "${PY_DIR}/lock.py" heartbeat "task:${TASK_ID}" --ttl 3600 2>/dev/null >/dev/null || true
+                fi
+                if [ -n "${TARGET_REPO:-}" ]; then
+                    python3 "${PY_DIR}/lock.py" heartbeat "repo:${TARGET_REPO}" --ttl 3600 2>/dev/null >/dev/null || true
+                fi
+
+                # ── Health check: verify lock still held ──────────────────
+                LOCK_CHECK=$(python3 "${PY_DIR}/lock.py" check "task:${TASK_ID:-unknown}" 2>/dev/null || echo '{"status":"free"}')
+                LOCK_STATUS_CHECK=$(echo "${LOCK_CHECK}" | python3 -c "
+import sys, json
+try: d = json.load(sys.stdin); print(d.get('status', 'free'))
+except: print('free')
+" 2>/dev/null || echo "free")
+                if [ "${LOCK_STATUS_CHECK}" = "free" ]; then
+                    log_warn "task lock lost — re-acquiring..."
+                    python3 "${PY_DIR}/lock.py" acquire "task:${TASK_ID:-unknown}" \
+                        --ttl 3600 --session "cycle-${CYCLE_NUM}" 2>/dev/null >/dev/null || true
+                fi
             fi
         done
 
@@ -681,6 +761,16 @@ print(json.dumps(entry))
         else
             log_warn "TASK_ID or TARGET_REPO not set — skipping completion"
         fi
+
+        # ── Release all locks for this cycle ─────────────────────────
+        if [ -n "${TASK_ID:-}" ]; then
+            python3 "${PY_DIR}/lock.py" release "task:${TASK_ID}" 2>/dev/null || true
+        fi
+        if [ -n "${TARGET_REPO:-}" ]; then
+            python3 "${PY_DIR}/lock.py" release "repo:${TARGET_REPO}" 2>/dev/null || true
+        fi
+        # Break any stale locks from this cycle as well
+        python3 "${PY_DIR}/lock.py" break-stale --prefix "task:" 2>/dev/null || true
 
         # Reset for next cycle
         START_PHASE=1

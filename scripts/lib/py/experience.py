@@ -20,6 +20,7 @@ Output: JSON to stdout.
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -84,9 +85,9 @@ def _detect_pattern_name(log_text: str) -> str:
 # ── Commands ───────────────────────────────────────────────────────────────
 
 def cmd_record(args: list[str]) -> int:
-    """experience.py record <error_pattern_or_log> <action_json> <success> [--repo R]"""
+    """experience.py record <error_pattern_or_log> <action_json> <success> [--repo R] [--tags T1,T2,...]"""
     if len(args) < 3:
-        print(json.dumps({"error": "usage: record <error_or_log> <action_json> <0|1> [--repo R]"}))
+        print(json.dumps({"error": "usage: record <error_or_log> <action_json> <0|1> [--repo R] [--tags T1,T2,...]"}))
         return 1
 
     error_input = args[0]
@@ -94,10 +95,15 @@ def cmd_record(args: list[str]) -> int:
     success = args[2] in ("1", "true", "yes")
 
     repo = ""
+    tags = []
     if "--repo" in args:
         ri = args.index("--repo")
         if ri + 1 < len(args):
             repo = args[ri + 1]
+    if "--tags" in args:
+        ti = args.index("--tags")
+        if ti + 1 < len(args):
+            tags = [t.strip() for t in args[ti + 1].split(",") if t.strip()]
 
     if os.path.isfile(error_input):
         with open(error_input, "r") as f:
@@ -112,6 +118,18 @@ def cmd_record(args: list[str]) -> int:
         action = json.loads(action_raw)
     except json.JSONDecodeError:
         action = {"type": "unknown", "message": action_raw}
+
+    # Auto-tag via tags.py if available
+    if not tags and repo:
+        try:
+            tags_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tags.py")
+            r = subprocess.run(
+                [sys.executable, tags_script, "search", error_input if not os.path.isfile(error_input) else error_input[:200],
+                 "--limit", "1"],
+                capture_output=True, text=True, timeout=5,
+            )
+        except Exception:
+            pass
 
     data = _load()
     patterns = data.setdefault("patterns", {})
@@ -139,8 +157,26 @@ def cmd_record(args: list[str]) -> int:
         "success": success,
         "timestamp": time.time(),
         "repo": repo,
+        "tags": tags,
     }
     entry["actions"].append(action_record)
+    entry.setdefault("tags", {})
+    for t in tags:
+        entry["tags"][t] = entry["tags"].get(t, 0) + 1
+
+    # Also write to tags.py system for cross-repo discovery
+    if tags:
+        try:
+            tags_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tags.py")
+            tid = fp[:40]  # Use fingerprint as item id
+            tag_str = ",".join(tags)
+            subprocess.run(
+                [sys.executable, tags_script, "tag", tid, tag_str,
+                 "--source", "experience", "--meta", f"pattern:{pattern_name}", "--meta", f"repo:{repo}"],
+                capture_output=True, timeout=5,
+            )
+        except Exception:
+            pass
 
     if len(entry["actions"]) > MAX_RECORDS:
         entry["actions"] = entry["actions"][-MAX_RECORDS:]
@@ -321,7 +357,6 @@ def cmd_apply(args: list[str]) -> int:
                     )
                 else:
                     print(f"  ✗ fix failed: {cmd} (rc={r.returncode})")
-                    # Record failure
                     subprocess.run(
                         [sys.executable, exp_script, "record",
                          log_path or suggest_file,
@@ -333,6 +368,40 @@ def cmd_apply(args: list[str]) -> int:
                 print(f"  ⚠ fix timeout: {cmd}")
             except Exception as e:
                 print(f"  ⚠ fix error: {e}")
+
+        # Handle edit-type actions: repair.py edit <file> --find <old> --replace <new>
+        elif conf >= 70 and s.get("action_type") == "edit":
+            file_path = s.get("file", "")
+            find_str = s.get("message", "")
+            if file_path and find_str:
+                fix_cmd = (
+                    f"{sys.executable} {os.path.join(os.path.dirname(exp_script), 'repair.py')} edit {file_path} "
+                    f"--find {shlex.quote(find_str)} --replace {shlex.quote(cmd)}"
+                )
+                try:
+                    r = subprocess.run(fix_cmd, shell=True, capture_output=True, text=True, timeout=30)
+                    result_data = json.loads(r.stdout) if r.stdout.strip() else {}
+                    if result_data.get("applied") or r.returncode == 0:
+                        print(f"  ✓ auto-applied edit: {file_path}")
+                        healed = True
+                        subprocess.run(
+                            [sys.executable, exp_script, "record",
+                             log_path or suggest_file,
+                             json.dumps({"type": "edit", "file": file_path}), "1",
+                             "--repo", repo],
+                            capture_output=True, timeout=10,
+                        )
+                    else:
+                        print(f"  ✗ edit failed: {file_path} ({r.stderr[:100]})")
+                        subprocess.run(
+                            [sys.executable, exp_script, "record",
+                             log_path or suggest_file,
+                             json.dumps({"type": "edit", "file": file_path}), "0",
+                             "--repo", repo],
+                            capture_output=True, timeout=10,
+                        )
+                except Exception as e:
+                    print(f"  ⚠ edit error: {e}")
 
     print(f"HEALED={'yes' if healed else 'no'}")
     return 0
@@ -369,6 +438,9 @@ def main():
     if len(sys.argv) < 2:
         print(json.dumps({"error": "usage: experience.py <record|suggest|_apply|stats> [...]"}))
         sys.exit(1)
+    if sys.argv[1] in ("--help", "-h"):
+        print(__doc__)
+        sys.exit(0)
 
     command = sys.argv[1]
     args = sys.argv[2:]
