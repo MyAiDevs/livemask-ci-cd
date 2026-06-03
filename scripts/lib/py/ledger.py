@@ -43,6 +43,8 @@ LEGAL_TRANSITIONS = {
     # Evidence gate
     "evidence_missing->implemented", "evidence_missing->in_progress",
     "completed_with_skip->completed",
+    # Reset (for auto-healing tasks marked done without actual dev)
+    "completed->ready", "completed_with_skip->ready", "verified->ready",
     # Wildcards
     "any->cancelled", "any->rejected", "any->evidence_missing",
 }

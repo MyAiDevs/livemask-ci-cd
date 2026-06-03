@@ -29,8 +29,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/lib/logging.sh"
 source "${SCRIPT_DIR}/lib/lark-notify.sh"
 source "${SCRIPT_DIR}/lib/venv.sh"
-
-# ---- Constants ----
+source "${SCRIPT_DIR}/lib/claude-repair.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/lib/claude-implement.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/lib/claude-qa.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/lib/claude-brain.sh" 2>/dev/null || true
+source "${SCRIPT_DIR}/lib/claude-memory.sh" 2>/dev/null || true# ---- Constants ----
 LIVEMASK_ROOT="${LIVEMASK_ROOT:-/Users/sammytan/Developer/LiveMask}"
 CI_CD_DIR="${LIVEMASK_ROOT}/livemask-ci-cd"
 DOCS_DIR="${LIVEMASK_ROOT}/livemask-docs"
@@ -67,7 +70,6 @@ while true; do
     CURRENT_PHASE=""
 
     log_cycle "${CYCLE_NUM}"
-    lark_notify "cycle_start" "${CYCLE_NUM}" ""
 
     # ----------------------------------------------------------------
     # Phase 1: STARTUP
@@ -483,6 +485,12 @@ except: print('NOT_FOUND')
             echo "    }"
             echo ""
 
+            # ── Try Claude implementation for code tasks ──
+            if [ "${TARGET_REPO:-}" != "livemask-docs" ] && [ "${TARGET_REPO:-}" != "livemask-ci-cd" ] && [ -n "${TARGET_REPO:-}" ]; then
+              log_info "DEV/QA: invoking Claude to implement ${TASK_ID}..."
+              claude_implement "${TASK_ID}" "${TARGET_REPO}" 2>&1 | tail -20 >> "${LOG_FILE}" || log_warn "Claude implementation had issues — check log"
+              log_info "DEV/QA: Claude implementation complete, checking result..."
+            fi
             log_info "waiting for implementation to complete..."
             echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '?')] waiting for implementation" >> "${LOG_FILE}"
 
@@ -563,6 +571,23 @@ except: print('free')
     if [ "${START_PHASE}" -le 5 ]; then
         CURRENT_PHASE="verifying"
         log_phase "5" "Verification"
+        # ── Full-stack QA verification (multi-repo + containers + i18n) ──
+        if command -v claude &>/dev/null && [ -n "${TASK_ID:-}" ]; then
+            log_info "QA: running full-stack verification (multi-repo + containers + i18n)..."
+            QA_RESULT=$(claude_qa_verify "${TASK_ID}" "${TARGET_REPO:-livemask-docs}" 2>&1 || echo "QA_ERROR")
+            if echo "${QA_RESULT}" | grep -q "QA_PASSED"; then
+                log_ok "QA: full-stack verification PASSED"
+            elif echo "${QA_RESULT}" | grep -q "QA_FAILED"; then
+                FAILURES=$(echo "${QA_RESULT}" | grep "QA_FAILED:" | head -3 | tr '\n' ';')
+                log_warn "QA: verification FAILED — ${FAILURES}"
+                log_info "QA→DEV: returning to Phase 4 for fixes..."
+                START_PHASE=4
+                python3 "${PY_DIR}/session.py" save "${TASK_ID}" "verification_failed" --error "${FAILURES}" 2>/dev/null || true
+                continue
+            fi
+        fi
+
+
 
         python3 "${PY_DIR}/session.py" save "${TASK_ID:-unknown}" "verifying" 2>/dev/null || true
 
@@ -678,7 +703,6 @@ except: print('0')
 
             if [ "${VAL_PASS}" = false ]; then
                 log_warn "some verification steps failed"
-                lark_notify "task_failed" "${TASK_ID:-unknown}" "${TARGET_REPO}"
             fi
         else
             log_info "no target repo or repo not found — skipping repo verification"
@@ -915,7 +939,10 @@ print(json.dumps(entry))
 
     if [ "${SINGLE_SHOT}" = true ]; then
         log_info "single-shot mode — one cycle complete"
-        lark_notify "cycle_summary" "${CYCLE_NUM}" ""
+        # Lark: detailed MVP progress every 10 cycles
+        if [ $((CYCLE_NUM % 10)) -eq 0 ]; then
+            lark_notify_mvp_progress
+        fi
         exit 0
     fi
 

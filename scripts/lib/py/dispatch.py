@@ -55,7 +55,7 @@ def _load_ledger(path: str) -> list[dict]:
 
 
 def _resolve_repo(task: dict) -> str:
-    """Map a ledger task to a repo name. Checks impacted_repos, module, and repo fields."""
+    """Map a ledger task to a repo name. Checks impacted_repos, repos, module, and repo fields."""
     impacted = task.get("impacted_repos", task.get("module", ""))
     if isinstance(impacted, str):
         impacted = [impacted]
@@ -63,16 +63,29 @@ def _resolve_repo(task: dict) -> str:
         for repo, (keyword, _) in REPO_FIELD_MAP.items():
             if keyword.lower() in ir.lower():
                 return repo
-        # direct repo name match
         if ir in REPO_FIELD_MAP:
             return ir
+    # Fallback: check `repos` list (set by auto_evidence.py)
+    repos_list = task.get("repos", [])
+    if isinstance(repos_list, list) and len(repos_list) > 0:
+        r = repos_list[0]
+        if r in REPO_FIELD_MAP:
+            return r
+        for dirname, (keyword, _) in REPO_FIELD_MAP.items():
+            if r.lower() == dirname or r.lower() == keyword.lower().replace(" ", "-"):
+                return dirname
+        return r  # Use as-is
+    # Fallback: check `repo` field (single string)
+    repo_field = task.get("repo", "")
+    if repo_field in REPO_FIELD_MAP:
+        return repo_field
     return "livemask-docs"
 
 
 def _is_implementable(task: dict) -> bool:
     """Return True if the task is in a state that can be dispatched."""
     status = task.get("status", "").lower()
-    return status in ("ready", "dispatched", "in_progress", "")
+    return status in ("ready", "dispatched", "in_progress", "blocked", "")
 
 
 # ── Packet scanner ────────────────────────────────────────────────────

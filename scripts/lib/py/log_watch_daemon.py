@@ -80,7 +80,7 @@ def poll_once():
             if os.path.getmtime(fpath) < cutoff:
                 continue
             try:
-                with open(fpath, "r") as f:
+                with open(fpath, "r", errors="replace") as f:
                     current_lines = sum(1 for _ in f)
             except (OSError, IOError):
                 continue

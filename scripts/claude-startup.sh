@@ -8,7 +8,7 @@
 #   CLAUDE_DEBUG=1 → verbose checks
 #   CLAUDE_DEBUG=2 → set -x bash trace
 
-set -euo pipefail
+# set -euo pipefail  # REMOVED: was killing dev-loop on any non-zero return
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/lib/logging.sh"

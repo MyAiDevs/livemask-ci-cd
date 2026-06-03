@@ -404,12 +404,8 @@ def _heal_stuck_task(error: dict) -> bool:
         return False
 
     if phase == "blocked":
-        result = _run_py("auto_evidence.py", "heal", task_id, timeout=30)
-        if result.get("actions_taken"):
-            _heal_log(f"auto_evidence healed {task_id}: {result['actions_taken']}")
-            return True
-        _heal_log(f"auto_evidence did not heal: {result}")
-        return False
+        _heal_log(f"task {task_id} already blocked — no action needed (dev-loop will advance to Phase 6)")
+        return True
 
     # phase is implementing / context_loaded
     auto_impl_result = _run_py("auto_implement.py", "detect", task_id, timeout=30)
@@ -500,14 +496,31 @@ def _run_docs_fixer(error: dict) -> bool:
     """Run docs-fixer.py to repair documentation issues."""
     docs_fixer = os.path.join(DOCS_DIR, "scripts", "docs-fixer.py")
     if not os.path.exists(docs_fixer):
+        _heal_log(f"docs-fixer not found at {docs_fixer}")
         return False
-    result = _run_py("../" + os.path.relpath(docs_fixer, PY_DIR), "fix", timeout=60)
-    fc = result.get("fixed_count", 0)
-    if fc > 0:
-        _heal_log(f"docs-fixer repaired {fc} issue(s)")
-        return True
-    _heal_log(f"docs-fixer: {result}")
-    return False
+    cmd = [sys.executable, docs_fixer, "fix"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if r.returncode == 0 and r.stdout.strip():
+            try:
+                result = json.loads(r.stdout)
+                fc = result.get("fixed_count", 0)
+                if fc > 0:
+                    _heal_log(f"docs-fixer repaired {fc} issue(s)")
+                    return True
+                _heal_log(f"docs-fixer: no issues fixed")
+                return False
+            except json.JSONDecodeError:
+                _heal_log(f"docs-fixer: {r.stdout.strip()[:200]}")
+                return bool(r.stdout.strip())
+        _heal_log(f"docs-fixer stderr: {r.stderr.strip()[:200]}")
+        return False
+    except subprocess.TimeoutExpired:
+        _heal_log("docs-fixer timed out after 60s")
+        return False
+    except Exception as e:
+        _heal_log(f"docs-fixer exception: {e}")
+        return False
 
 
 @traced
@@ -621,7 +634,7 @@ def poll_once() -> list[dict]:
                 continue
 
             try:
-                with open(fpath, "r") as f:
+                with open(fpath, "r", errors="replace") as f:
                     all_lines = f.readlines()
                 current_lines = len(all_lines)
             except (OSError, IOError):
@@ -789,7 +802,7 @@ def daemon_loop():
 def cmd_diagnose(logfile: str) -> list[dict]:
     """Diagnose a log file and return all detected error patterns."""
     try:
-        with open(logfile) as f:
+        with open(logfile, errors="replace") as f:
             content = f.read()
     except (OSError, IOError) as e:
         _heal_log(f"cannot read {logfile}: {e}")

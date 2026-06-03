@@ -620,6 +620,7 @@ def cmd_heal(task_id: str) -> dict:
         entry = {
             "task_id": task_id,
             "status": status,
+            "repo": repos[0] if repos else "livemask-docs",
             "repos": repos,
             "dev_merge_commit": "",
             "remote_dev_ref": "",
@@ -640,11 +641,18 @@ def cmd_heal(task_id: str) -> dict:
 
     # ── Advance session appropriately ──
     if phase in ("blocked", "implementing") and is_code and not verify_result.get("files_exist"):
-        # Real code task with no files → keep blocked, don't advance
-        log(f"real code task {task_id} — no files found, keeping blocked for dev execution")
-        actions.append("blocked: real code task requiring development (no implementation files)")
+        if phase == "blocked":
+            # Already blocked — no need to re-save, but note it
+            log(f"real code task {task_id} — already blocked, needs real dev in {verify_result.get('impl_repo', '?')}")
+        else:
+            # Real code task with no files → advance session to blocked so dev-loop can progress
+            log(f"real code task {task_id} — no files found, advancing session to blocked")
+            run_py("session.py", "save", task_id, "blocked",
+                   "--branch", branch, "--error", "real code task requiring development")
+            actions.append(f"advanced session: {phase} → blocked (real code task)")
+            log(f"advanced {task_id} from {phase} to blocked")
     elif phase in ("blocked", "implementing") and not is_code:
-        # Docs task → complete
+        # Docs task → complete (advance even if already blocked)
         run_py("session.py", "save", task_id, "completed",
                "--branch", branch, "--error", "")
         actions.append(f"advanced session: {phase} → completed (docs task)")

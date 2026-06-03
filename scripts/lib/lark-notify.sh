@@ -59,7 +59,7 @@ lark_notify_pm_report() {
   lark_send "📋 PM 诊断完成" "blue" $'🔍 **发现**: '"${1:-0}"$' 条\n🚫 **阻塞**: '"${2:-0}"$' 个\n📌 **缺口**: '"${3:-0}"$' 个'
 }
 lark_notify_task_accepted() {
-  lark_send "✅ 任务已接受" "green" $'**'"${1:-?}"$'**\n\n📦 仓库: '"${2:-?}"$'\n⭐ 优先级: '"${3:-P1}"$'\n\n引擎已开始实现'
+  lark_send "🚀 任务编排" "blue" $'**'"${1:-?}"$'**\n\n📦 仓库: '"${2:-?}"$'\n⭐ 优先级: '"${3:-P1}"$'\n\n引擎已开始实现'
 }
 lark_notify_review_result() {
   if [[ "${2:-}" == "approved" ]]; then
@@ -76,7 +76,7 @@ lark_notify_qa_result() {
   fi
 }
 lark_notify_merge_complete() {
-  lark_send "🚀 合并完成" "green" $'**'"${1:-?}"$'**\n\n📦 仓库: '"${2:-?}"$'\n🔗 提交: '"${3:-?}"$'\n\n✅ 已合并到 dev，CI 运行中'
+  lark_send "✅ 任务完成" "green" $'**'"${1:-?}"$'**\n\n📦 仓库: '"${2:-?}"$'\n🔗 提交: '"${3:-?}"$'\n\n✅ 已合并到 dev，CI 运行中'
 }
 lark_notify_monitor_insight() {
   lark_send "🧠 Monitor 洞察" "blue" "${1:-}"
