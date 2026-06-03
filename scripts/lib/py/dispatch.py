@@ -168,8 +168,21 @@ def cmd_next(args: list[str]) -> int:
     if packets_dir:
         packets = _scan_packets(packets_dir)
         if packets:
+            # Build a set of completed task IDs from the ledger
+            ledger_tasks, _, _ = _load_ledger(ledger_path)
+            completed_tasks = set()
+            for t in ledger_tasks:
+                status = t.get("status", "").lower()
+                if status in ("completed", "completed_with_skip", "cancelled", "rejected"):
+                    tid = t.get("id", t.get("task_id", ""))
+                    if tid:
+                        completed_tasks.add(tid)
+
             for pkt in packets:
                 tid = pkt.get("task_id", pkt.get("id", ""))
+                # Skip if already completed in ledger
+                if tid and tid in completed_tasks:
+                    continue
                 # Check lock before dispatching — skip if already locked
                 if tid:
                     lock_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lock.py")
@@ -186,7 +199,7 @@ def cmd_next(args: list[str]) -> int:
                 out = _format_packet_output(pkt)
                 print(json.dumps(out))
                 return 0
-            # All packets locked — fall through to ledger
+            # All packets locked or completed — fall through to ledger
 
     # 2. Fall back to ledger
     tasks, ok, err = _load_ledger(ledger_path)
