@@ -238,23 +238,25 @@ def _normalize_tid(tid: str) -> str:
 # ── Source 4: GitHub Issues ─────────────────────────────────────────────────
 def scan_github_issues(repos: list[str]) -> dict[str, list[dict]]:
     """
-    Scan GitHub open issues across the given repos.
+    Scan GitHub open issues across the given repos via gh_cache (cached).
     Returns {repo: [{number, title, url, labels}]}.
     """
     result = {}
-    if not _gh_available():
-        return result
+    cache_py = os.path.join(os.path.dirname(__file__), "gh_cache.py")
 
     for repo in repos:
-        r = _run_gh(["issue", "list",
-                      "--repo", f"{REPO_PREFIX}/{repo}",
-                      "--state", "open",
-                      "--limit", "100",
-                      "--json", "number,title,url,labels"])
-        if r.returncode != 0:
-            continue
+        full_repo = f"{REPO_PREFIX}/{repo}"
         try:
+            r = subprocess.run(
+                [sys.executable, cache_py, "list", full_repo,
+                 "--state", "open", "--limit", "100", "--ttl", "120"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if r.returncode != 0:
+                continue
             issues = json.loads(r.stdout)
+            if isinstance(issues, dict) and "error" in issues:
+                continue
             result[repo] = [
                 {
                     "number": i["number"],
@@ -264,7 +266,7 @@ def scan_github_issues(repos: list[str]) -> dict[str, list[dict]]:
                 }
                 for i in issues
             ]
-        except json.JSONDecodeError:
+        except Exception:
             continue
     return result
 

@@ -727,12 +727,17 @@ def cmd_scan_github(args: list[str]) -> int:
     for repo in repos_to_scan:
         gh_repo = f"MyAiDevs/{repo}"
 
-        # Get ALL open issues (no label filter — we check each one)
-        issues_json = _run_gh("issue", "list",
-                              "--repo", gh_repo,
-                              "--state", "open",
-                              "--limit", "50",
-                              "--json", "number,title,body,url,labels,createdAt,updatedAt")
+        # Get ALL open issues via gh_cache (cached, limits API calls)
+        cache_py = os.path.join(str(PY_DIR), "gh_cache.py")
+        try:
+            r = subprocess.run(
+                [sys.executable, cache_py, "list", gh_repo,
+                 "--state", "open", "--limit", "50", "--ttl", "120"],
+                capture_output=True, text=True, timeout=30,
+            )
+            issues_json = r.stdout if r.returncode == 0 else ""
+        except Exception:
+            issues_json = ""
 
         if not issues_json:
             errors.append(f"no issues found for {gh_repo} (or gh CLI unavailable)")
