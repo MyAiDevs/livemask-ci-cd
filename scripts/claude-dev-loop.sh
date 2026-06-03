@@ -17,7 +17,11 @@
 #   ./claude-dev-loop.sh --phase 4    # Resume from phase 4
 #   ./claude-dev-loop.sh --help       # Show usage
 
-set -euo pipefail
+# Debug mode (via CLAUDE_DEBUG env var, set before sourcing logging.sh)
+#   CLAUDE_DEBUG=0 — normal mode
+#   CLAUDE_DEBUG=1 — debug mode (ERR trap, call stacks, debug messages)
+#   CLAUDE_DEBUG=2 — trace mode (per-statement PS4 tracing)
+CLAUDE_DEBUG="${CLAUDE_DEBUG:-0}"
 
 # Source logging
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

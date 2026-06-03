@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # lark-notify.sh — Beautiful Lark cards + templates + GitHub integration
-set -euo pipefail
+# NO set -euo pipefail! This is a sourced library, caller controls error handling.
+set -u
 SEND_PY="$(cd "$(dirname "$0")" && pwd)/_lark_send.py"
 DOCS_DIR="${DOCS_DIR:-/Users/sammytan/Developer/LiveMask/livemask-docs}"
 

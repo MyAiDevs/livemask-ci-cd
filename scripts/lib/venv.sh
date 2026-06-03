@@ -19,7 +19,8 @@
 #   bash venv.sh path              # Print venv python path
 #   bash venv.sh install <pkg...>  # Install additional packages
 
-set -euo pipefail
+set -u
+# NO set -e or pipefail! This is a sourced library.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
