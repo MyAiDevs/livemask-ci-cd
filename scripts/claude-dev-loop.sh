@@ -22,6 +22,7 @@
 #   CLAUDE_DEBUG=1 — debug mode (ERR trap, call stacks, debug messages)
 #   CLAUDE_DEBUG=2 — trace mode (per-statement PS4 tracing)
 CLAUDE_DEBUG="${CLAUDE_DEBUG:-0}"
+export CLAUDE_DEBUG  # Propagate to ALL child shell scripts AND Python subprocesses
 
 # Source logging
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

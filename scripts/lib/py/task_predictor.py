@@ -30,6 +30,8 @@ import time
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "cache")
 PREDICTION_FILE = os.path.join(CACHE_DIR, "task-predictions.json")
 LIVEMASK_ROOT = os.environ.get("LIVEMASK_ROOT",
@@ -505,6 +507,7 @@ def cmd_stats(args: list[str]) -> int:
 # ── Main CLI ────────────────────────────────────────────────────────
 
 def main():
+    _debug_setup()
     if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
         print(__doc__)
         return 0 if sys.argv[1:2] in (["--help"], ["-h"]) else 1

@@ -9,6 +9,7 @@ Usage:
 import json, sys, argparse, os, subprocess
 from pathlib import Path
 from datetime import datetime, timezone
+from debug_utils import setup as _debug_setup, traced, logger as _logger
 
 DOCS_DIR = Path(os.environ.get("DOCS_DIR", os.path.expanduser("~/Developer/LiveMask/livemask-docs")))
 LEDGER_PATH = DOCS_DIR / "docs/development/task-state-ledger.json"
@@ -180,7 +181,9 @@ def consistency_check(task_id_filter: str = "") -> dict:
 # CLI
 # ══════════════════════════════════════════════════════════════════════════════
 
+@traced
 def main():
+    _debug_setup()
     parser = argparse.ArgumentParser(description="Completion gate + consistency checks")
     sub = parser.add_subparsers(dest="command", required=True)
 

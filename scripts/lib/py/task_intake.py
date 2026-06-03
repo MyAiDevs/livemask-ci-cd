@@ -39,6 +39,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from collections import Counter
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 # ── Paths ──────────────────────────────────────────────────────────────────
 
 LIVEMASK_ROOT = os.environ.get("LIVEMASK_ROOT",
@@ -900,7 +902,9 @@ def cmd_check_duplicate(args: list[str]) -> int:
     return 0
 
 
+@traced
 def main():
+    _debug_setup()
     if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
         print(__doc__)
         return 0 if sys.argv[1:2] in (["--help"], ["-h"]) else 1

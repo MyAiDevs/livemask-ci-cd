@@ -16,6 +16,8 @@ import json, os, sys, glob, time, re, subprocess
 from pathlib import Path
 from datetime import datetime, timezone
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 LIVEMASK_ROOT = os.environ.get(
     "LIVEMASK_ROOT",
     str(Path(__file__).resolve().parent.parent.parent.parent.parent),
@@ -32,9 +34,10 @@ EVIDENCE_LOG = "/tmp/claude/auto-evidence.log"
 
 
 def log(msg: str):
+    """Log a diagnostic message to stderr (never stdout!) and to the evidence log file."""
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     line = f"[auto-evidence] {ts} {msg}"
-    print(line, flush=True)
+    print(line, file=sys.stderr, flush=True)
     try:
         with open(EVIDENCE_LOG, "a") as f:
             f.write(line + "\n")
@@ -341,6 +344,7 @@ def _heuristic_files(task_id: str, main_repo: str, repos: list[str]) -> tuple[li
     return (existing, missing)
 
 
+@traced
 def cmd_verify(task_id: str) -> dict:
     """Verify evidence chain and implementation status."""
     result = {
@@ -540,6 +544,7 @@ def complete_evidence_chain(task_id: str, impl: dict) -> list[str]:
     return actions
 
 
+@traced
 def cmd_heal(task_id: str) -> dict:
     """Auto-heal missing evidence for a blocked task.
 
@@ -652,6 +657,7 @@ def cmd_heal(task_id: str) -> dict:
     }
 
 
+@traced
 def cmd_scan() -> list[dict]:
     """Scan for blocked tasks in both session and ledger."""
     results = []
@@ -687,6 +693,7 @@ def cmd_scan() -> list[dict]:
 
 
 def main():
+    _debug_setup()
     if len(sys.argv) < 2:
         print("Usage: auto_evidence.py <verify|heal|scan> [task-id]")
         sys.exit(1)

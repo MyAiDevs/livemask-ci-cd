@@ -1,38 +1,44 @@
 #!/usr/bin/env python3
 """
-log_watch_daemon.py — Background log watcher daemon for Claude dev loop.
+log_watch_daemon.py — Thin log monitor daemon.
 
-Monitors log files for error patterns, checks experience system first,
-falls back to repair.py --apply.  Thin Python daemon avoids bash 3.2
-compatibility issues with array expansion, `local`, and `nohup`.
+Delegates ALL detection, classification, and action to self_heal.py.
 
-Used by log-watch.sh via:
-    python3 log_watch_daemon.py poll
+This daemon's sole job is to:
+  1. Watch log directories for new/modified log files
+  2. Track line counts per file (so we only process NEW content)
+  3. Call self_heal.py poll on each cycle
+  4. Auto-reload when code changes (watchdog)
 
 Usage:
-    python3 log_watch_daemon.py poll           # Single poll cycle (for cron/scheduled)
+    python3 log_watch_daemon.py poll           # Single poll cycle
     python3 log_watch_daemon.py daemon          # Continuous daemon loop
 
-Output: JSON lines to stdout.
+Effectively a thin wrapper — all intelligence lives in self_heal.py.
 """
 
-import json
 import os
 import subprocess
 import sys
 import time
-from pathlib import Path
+
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
+_debug_setup()
 
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".claude")
-WATCH_DIRS = ["/tmp/claude"]
+PY_DIR = os.path.join(
+    os.environ.get("LIVEMASK_ROOT", os.path.expanduser("~/Developer/LiveMask")),
+    "livemask-ci-cd", "scripts", "lib", "py"
+)
+SELF_HEAL = os.path.join(PY_DIR, "self_heal.py")
 LINE_COUNTS_FILE = os.path.join(CACHE_DIR, "log-watch-lines.json")
-FIX_COUNTER_FILE = os.path.join(CACHE_DIR, "log-watch-fixes.json")
-PY_DIR = os.path.join(os.environ.get("LIVEMASK_ROOT", os.path.expanduser("~/Developer/LiveMask")),
-                      "livemask-ci-cd", "scripts", "lib", "py")
-MAX_FIXES_PER_MINUTE = 10
+
+WATCH_DIRS = ["/tmp/claude"]
 
 
-def _load_json(path: str, default: dict = None) -> dict:
+def _load_json(path: str, default=None):
+    import json
     try:
         with open(path) as f:
             return json.load(f)
@@ -40,7 +46,8 @@ def _load_json(path: str, default: dict = None) -> dict:
         return default or {}
 
 
-def _save_json(path: str, data: dict):
+def _save_json(path: str, data):
+    import json
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         json.dump(data, f)
@@ -57,342 +64,60 @@ def _state_set_line(logfile: str, count: int):
     _save_json(LINE_COUNTS_FILE, d)
 
 
-def _fix_counter_check() -> bool:
-    now = int(time.time())
-    d = _load_json(FIX_COUNTER_FILE, {"last_minute_window": 0, "fixes_this_window": 0, "total_fixes": 0})
-
-    if now - d.get("last_minute_window", 0) > 60:
-        d["last_minute_window"] = now
-        d["fixes_this_window"] = 0
-
-    if d["fixes_this_window"] >= MAX_FIXES_PER_MINUTE:
-        return False
-
-    d["fixes_this_window"] += 1
-    d["total_fixes"] = d.get("total_fixes", 0) + 1
-    _save_json(FIX_COUNTER_FILE, d)
-    return True
-
-
-SESSION_STATE = os.path.join(CACHE_DIR, "role-cache", "session-state.json")
-
-
-def _session_phase() -> str:
-    """Read current session phase."""
-    try:
-        with open(SESSION_STATE) as f:
-            d = json.load(f)
-        return d.get("phase", "")
-    except (FileNotFoundError, json.JSONDecodeError):
-        return ""
-
-
-def _session_task_id() -> str:
-    """Read current session task_id."""
-    try:
-        with open(SESSION_STATE) as f:
-            d = json.load(f)
-        return d.get("task_id", "")
-    except (FileNotFoundError, json.JSONDecodeError):
-        return ""
-
-
-def _resolve_stuck_phase4():
-    """Auto-resolve Phase 4 stuck state by detecting and acting on the task."""
-    phase = _session_phase()
-    task_id = _session_task_id()
-
-    if not task_id:
-        print(f"[log-watch][phase4] no task_id in session state", flush=True)
-        return False
-
-    if phase not in ("implementing", "context_loaded", "blocked"):
-        print(f"[log-watch][phase4] session phase={phase} not stuck", flush=True)
-        return False
-
-    print(f"[log-watch][phase4] detected stuck task: {task_id} (phase={phase})", flush=True)
-
-    # Step 0: If phase is blocked, use auto_evidence.py to heal the evidence chain
-    if phase == "blocked":
-        auto_ev_py = os.path.join(PY_DIR, "auto_evidence.py")
-        if os.path.exists(auto_ev_py):
-            print(f"[log-watch][phase4] phase=blocked — running auto_evidence.py heal {task_id}", flush=True)
-            try:
-                r = subprocess.run(
-                    [sys.executable, auto_ev_py, "heal", task_id],
-                    capture_output=True, text=True, timeout=30,
-                )
-                result = json.loads(r.stdout) if r.stdout.strip() else {}
-                if result.get("actions_taken"):
-                    print(f"[log-watch][phase4] ✅ auto-evidence healed {task_id}: {result['actions_taken']}", flush=True)
-                    return True
-                print(f"[log-watch][phase4] auto-evidence: {r.stdout.strip()}", flush=True)
-            except Exception as e:
-                print(f"[log-watch][phase4] auto_evidence error: {e}", flush=True)
-        return False
-
-    auto_impl_py = os.path.join(PY_DIR, "auto_implement.py")
-    if not os.path.exists(auto_impl_py):
-        print(f"[log-watch][phase4] auto_implement.py not found, checking if already completed in ledger...", flush=True)
-
-        # Fallback: check ledger for completed status
-        ledger_path = os.path.join(
-            os.environ.get("LIVEMASK_ROOT", os.path.expanduser("~/Developer/LiveMask")),
-            "livemask-docs", "docs/development", "task-state-ledger.json"
-        )
-        try:
-            with open(ledger_path) as f:
-                ledger = json.load(f)
-            for mod in ledger.get("modules", []):
-                for t in mod.get("tasks", []):
-                    if t.get("task_id") == task_id:
-                        s = t.get("status", "")
-                        if s in ("completed", "completed_with_skip"):
-                            print(f"[log-watch][phase4] task {task_id} already {s} in ledger — advancing session", flush=True)
-                            subprocess.run(
-                                [sys.executable, os.path.join(PY_DIR, "session.py"),
-                                 "save", task_id, "verifying", "--branch", f"task/{task_id}"],
-                                capture_output=True, timeout=30,
-                            )
-                            return True
-        except Exception:
-            pass
-        return False
-
-    # Step 1: Check if auto-implementable
-    try:
-        r = subprocess.run(
-            [sys.executable, auto_impl_py, "detect", task_id],
-            capture_output=True, text=True, timeout=30,
-        )
-        if r.returncode == 0:
-            print(f"[log-watch][phase4] task {task_id} IS auto-implementable — running impl...", flush=True)
-            # Step 2: Auto-implement
-            try:
-                r2 = subprocess.run(
-                    [sys.executable, auto_impl_py, "impl", task_id],
-                    capture_output=True, text=True, timeout=60,
-                )
-                print(f"[log-watch][phase4] auto_implement.py impl result: {r2.stdout.strip()}", flush=True)
-                if r2.returncode == 0:
-                    print(f"[log-watch][phase4] ✅ auto-implemented {task_id}", flush=True)
-                    return True
-                print(f"[log-watch][phase4] impl failed: {r2.stderr.strip()}", flush=True)
-                return False
-            except subprocess.TimeoutExpired:
-                print(f"[log-watch][phase4] impl timed out for {task_id}", flush=True)
-                return False
-            except Exception as e:
-                print(f"[log-watch][phase4] impl error: {e}", flush=True)
-                return False
-        else:
-            # Task is NOT auto-implementable — this is a real code task
-            print(f"[log-watch][phase4] task {task_id} requires real implementation (not auto-implementable)", flush=True)
-            print(f"[log-watch][phase4] Reason: {r.stdout.strip() or r.stderr.strip()}", flush=True)
-            # Use auto_evidence.py to create ledger entry and advance session
-            auto_ev_py = os.path.join(PY_DIR, "auto_evidence.py")
-            if os.path.exists(auto_ev_py):
-                try:
-                    r3 = subprocess.run(
-                        [sys.executable, auto_ev_py, "heal", task_id],
-                        capture_output=True, text=True, timeout=30,
-                    )
-                    result3 = json.loads(r3.stdout) if r3.stdout.strip() else {}
-                    if result3.get("actions_taken"):
-                        print(f"[log-watch][phase4] ✅ auto-evidence rescued code task {task_id}: {result3['actions_taken']}", flush=True)
-                        return True
-                    print(f"[log-watch][phase4] auto-evidence: {r3.stdout.strip()}", flush=True)
-                except Exception as e:
-                    print(f"[log-watch][phase4] auto_evidence error: {e}", flush=True)
-            return False
-    except subprocess.TimeoutExpired:
-        print(f"[log-watch][phase4] detect timed out for {task_id}", flush=True)
-        return False
-    except Exception as e:
-        print(f"[log-watch][phase4] detect error: {e}", flush=True)
-        return False
-
-
-def _auto_repair(logfile: str, new_lines: str):
-    """Check new lines for errors, then try experience system + repair.py + docs-fixer."""
-    import re
-    if not re.search(r'(error|fail|panic|exit status|not found|check-docs|Missing Markdown|Traceability check)', new_lines, re.IGNORECASE):
-        return
-
-    if not _fix_counter_check():
-        print(f"[log-watch] rate limited", flush=True)
-        return
-
-    # ── Docs-fixer: detect markdown/doc issues ──
-    if re.search(r'(check-docs\.sh|Missing Markdown|Traceability check|Documentation checks)', new_lines, re.IGNORECASE):
-        docs_fixer = os.path.join(
-            os.environ.get("LIVEMASK_ROOT", os.path.expanduser("~/Developer/LiveMask")),
-            "livemask-docs", "scripts", "docs-fixer.py"
-        )
-        if os.path.exists(docs_fixer):
-            print(f"[log-watch][docs-fixer] running auto-fix...", flush=True)
-            try:
-                r = subprocess.run(
-                    [sys.executable, docs_fixer, "fix"],
-                    capture_output=True, text=True, timeout=60,
-                )
-                result = json.loads(r.stdout) if r.stdout.strip() else {}
-                fc = result.get("fixed_count", 0)
-                if fc > 0:
-                    print(f"[log-watch][docs-fixer] ✅ fixed {fc} doc issue(s)", flush=True)
-                    for a in result.get("actions", []):
-                        print(f"[log-watch][docs-fixer]   {a}", flush=True)
-                else:
-                    uc = result.get("unfixable_count", 0)
-                    print(f"[log-watch][docs-fixer] 0 fixable, {uc} unfixable", flush=True)
-            except Exception as e:
-                print(f"[log-watch][docs-fixer] error: {e}", flush=True)
-
-    # 1. Try experience.suggest + _apply
-    suggest_file = f"/tmp/log-watch-suggest-{os.getpid()}.json"
-    applied = False
-    try:
-        r = subprocess.run(
-            [sys.executable, os.path.join(PY_DIR, "experience.py"), "suggest", logfile],
-            capture_output=True, timeout=30,
-        )
-        # BUG FIX: write stdout to suggest_file so _apply can read it
-        if r.returncode == 0 and r.stdout.strip():
-            with open(suggest_file, "w") as sf:
-                sf.write(r.stdout.decode() if isinstance(r.stdout, bytes) else r.stdout)
-    except Exception as e:
-        print(f"[log-watch] experience.suggest error: {e}", flush=True)
-
-    if os.path.exists(suggest_file):
-        try:
-            with open(suggest_file) as f:
-                suggest_data = json.load(f)
-            if suggest_data.get("status") == "ok" and suggest_data.get("suggestions"):
-                print(f"[log-watch] experience has {len(suggest_data['suggestions'])} suggestions for {logfile}", flush=True)
-                apply_r = subprocess.run(
-                    [sys.executable, os.path.join(PY_DIR, "experience.py"), "_apply", suggest_file],
-                    capture_output=True, text=True, timeout=60,
-                )
-                # Record whether the apply healed or not
-                healed = "HEALED=yes" in apply_r.stdout
-                print(f"[log-watch] experience._apply {'healed' if healed else 'did not heal'} {logfile}", flush=True)
-                if healed:
-                    applied = True
-        except (json.JSONDecodeError, subprocess.TimeoutExpired) as e:
-            print(f"[log-watch] experience._apply error: {e}", flush=True)
-        try:
-            os.unlink(suggest_file)
-        except OSError:
-            pass
-
-    # 2. If experience didn't heal, fall back to repair.py --apply
-    if not applied:
-        try:
-            r = subprocess.run(
-                [sys.executable, os.path.join(PY_DIR, "repair.py"), "build", logfile, "--apply"],
-                capture_output=True, text=True, timeout=120,
-            )
-            status = "?"
-            try:
-                result = json.loads(r.stdout)
-                status = result.get("status", "?")
-            except json.JSONDecodeError:
-                status = "parse_error"
-            print(f"[log-watch] repair.py status={status} for {logfile}", flush=True)
-        except subprocess.TimeoutExpired:
-            print(f"[log-watch] repair.py timed out for {logfile}", flush=True)
-        except Exception as e:
-            print(f"[log-watch] repair.py error: {e}", flush=True)
-
-
-def _check_stuck_phase4():
-    """Independent check: is session stuck in Phase 4? If so, resolve."""
-    phase = _session_phase()
-    task_id = _session_task_id()
-    if not task_id or phase not in ("implementing", "context_loaded"):
-        # Also handle blocked phase
-        if task_id and phase == "blocked":
-            print(f"[log-watch][phase4] found blocked task in session: {task_id}", flush=True)
-            if _fix_counter_check():
-                _resolve_stuck_phase4()
-        return
-
-    # Check log files for "waiting for implementation"
-    found_waiting = False
-    for watch_dir in WATCH_DIRS:
-        if not os.path.isdir(watch_dir):
-            continue
-        for entry in sorted(os.listdir(watch_dir), reverse=True):
-            fpath = os.path.join(watch_dir, entry)
-            if "claude-dev-loop" not in entry or not os.path.isfile(fpath):
-                continue
-            try:
-                with open(fpath, "r") as f:
-                    content = f.read()
-                if "waiting for implementation" in content:
-                    found_waiting = True
-                    break
-            except (OSError, IOError):
-                continue
-        if found_waiting:
-            break
-
-    if not found_waiting:
-        return
-
-    print(f"[log-watch][phase4] stuck detected: {task_id} (phase={phase})", flush=True)
-    if _fix_counter_check():
-        _resolve_stuck_phase4()
-
-
+@traced
 def poll_once():
-    """Single poll cycle: scan log dirs, check for new lines, auto-repair."""
+    """Single poll cycle: update line counts, then delegate to self_heal.py."""
     now_ts = time.time()
     cutoff = now_ts - 300  # 5 minutes
 
-    # ── Check for Phase 4 stuck state ──
-    _check_stuck_phase4()
-
-    # ── Normal: scan log dirs for new error lines ──
     for watch_dir in WATCH_DIRS:
         if not os.path.isdir(watch_dir):
             continue
-
         for entry in os.listdir(watch_dir):
             fpath = os.path.join(watch_dir, entry)
             if not fpath.endswith(".log") or not os.path.isfile(fpath):
                 continue
             if os.path.getmtime(fpath) < cutoff:
                 continue
-
             try:
                 with open(fpath, "r") as f:
                     current_lines = sum(1 for _ in f)
             except (OSError, IOError):
-                current_lines = 0
-
+                continue
             prev_lines = _state_get_line(fpath)
-
-            if current_lines > prev_lines > 0:
-                try:
-                    with open(fpath, "r") as f:
-                        all_lines = f.readlines()
-                    new_content = "".join(all_lines[prev_lines:])
-                    if new_content.strip():
-                        _auto_repair(fpath, new_content)
-                except (OSError, IOError):
-                    pass
-
+            if current_lines > prev_lines and prev_lines > 0:
+                # New content appeared — flag for self_heal
+                pass
             _state_set_line(fpath, current_lines)
 
+    # Delegate all detection/action to self_heal.py
+    if os.path.exists(SELF_HEAL):
+        try:
+            r = subprocess.run(
+                [sys.executable, SELF_HEAL, "poll"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if r.stdout.strip():
+                print(f"[log-watch] self_heal: {r.stdout.strip()[:500]}", flush=True)
+            if r.stderr.strip():
+                print(f"[log-watch] self_heal(stderr): {r.stderr.strip()[:500]}", flush=True)
+        except subprocess.TimeoutExpired:
+            print(f"[log-watch] self_heal poll timed out", flush=True)
+        except Exception as e:
+            print(f"[log-watch] self_heal error: {e}", flush=True)
+    else:
+        print(f"[log-watch] self_heal.py not found — no action taken", flush=True)
 
+
+@traced
 def daemon_loop():
     """Continuous daemon loop (poll every 5s) with auto-reload."""
     pid_file = os.path.join(CACHE_DIR, "log-watch.pid")
     with open(pid_file, "w") as f:
         f.write(str(os.getpid()))
-    # Sync PID to file system so status checks work immediately
+
     import atexit
+
     def _cleanup():
         try:
             if os.path.exists(pid_file):
@@ -401,13 +126,12 @@ def daemon_loop():
             pass
     atexit.register(_cleanup)
 
-    # Auto-reload watchdog: monitor own file + py_dir + lib_dir for changes
+    # Auto-reload watchdog
     from watchdog import Watchdog
     w = Watchdog(poll_interval=60)
     w.watch(os.path.abspath(__file__))
-    w.watch_dir(os.path.dirname(__file__))                     # scripts/lib/py/
-    w.watch_dir(os.path.dirname(os.path.dirname(__file__)))    # scripts/lib/
-    # Non-blocking check: peek without sleeping
+    w.watch_dir(os.path.dirname(__file__))
+
     def _should_reload() -> bool:
         if w._reload_requested:
             return True
@@ -419,14 +143,14 @@ def daemon_loop():
             except OSError:
                 pass
         return False
-    _reload_counter = 0
 
-    print("[log-watch] daemon started (poll every 5s, check reload every ~60s)", flush=True)
+    reload_counter = 0
+    print("[log-watch] daemon started (poll 5s, delegate to self_heal.py)", flush=True)
+
     while True:
-        # Reload check (every ~12 iterations = ~60s)
-        _reload_counter += 1
-        if _reload_counter >= 12:
-            _reload_counter = 0
+        reload_counter += 1
+        if reload_counter >= 12:
+            reload_counter = 0
             if _should_reload():
                 w.restart()
         try:

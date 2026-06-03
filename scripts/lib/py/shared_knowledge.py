@@ -35,6 +35,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "cache")
 SHARED_INDEX_FILE = os.path.join(CACHE_DIR, "shared-knowledge-index.json")
 SUPPLEMENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "supplement")
@@ -1419,7 +1421,9 @@ def cmd_stats(args: list[str]) -> int:
     return 0
 
 
+@traced
 def main():
+    _debug_setup()
     if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
         print(__doc__)
         return 0 if sys.argv[1:2] in (["--help"], ["-h"]) else 1

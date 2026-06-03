@@ -21,6 +21,8 @@ import os
 import re
 import sys
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 # ── Structured Knowledge Registry ─────────────────────────────────────
 # Each topic has: title, tags, summary, details (list of bullet points),
 # patterns (code patterns / examples), and related_topics.
@@ -565,6 +567,7 @@ def cmd_search(args: list[str]) -> int:
 
 
 def main():
+    _debug_setup()
     if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
         print(__doc__)
         return 0 if sys.argv[1:2] in (["--help"], ["-h"]) else 1

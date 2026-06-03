@@ -15,6 +15,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 LEDGER_PATH = Path(os.environ.get("LEDGER_FILE", ""))
 if not LEDGER_PATH.is_absolute() or not str(LEDGER_PATH):
     # Default: derive from DOCS_DIR or LIVEMASK_ROOT
@@ -70,6 +72,7 @@ def check_transition(old_status: str, new_status: str) -> tuple[bool, str]:
         return True, ""
     return False, f"illegal transition: {old_status} -> {new_status}"
 
+@traced
 def cmd_find(args):
     ledger, _ = load_ledger()
     result = find_task(ledger, args.task_id)
@@ -126,6 +129,7 @@ def cmd_list(args):
     print(json.dumps(results, indent=2))
     return 0
 
+@traced
 def cmd_add(args):
     ledger, path = load_ledger()
     try:
@@ -163,6 +167,7 @@ def cmd_add(args):
 
 
 def main():
+    _debug_setup()
     parser = argparse.ArgumentParser(description="Ledger state machine (single writer)")
     sub = parser.add_subparsers(dest="command", required=True)
 

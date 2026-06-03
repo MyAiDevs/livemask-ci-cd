@@ -23,6 +23,8 @@ import base64
 import urllib.request
 import urllib.error
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 
 def _gen_sign(timestamp: int, secret: str) -> str:
     """Generate HMAC-SHA256 signature for Lark webhook."""
@@ -216,6 +218,7 @@ def cmd_notify(args: list[str]) -> int:
 
 
 def main():
+    _debug_setup()
     if len(sys.argv) < 2:
         print("Usage:")
         print("  lark_send.py text <webhook_url> <message>")

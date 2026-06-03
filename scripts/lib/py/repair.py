@@ -30,6 +30,8 @@ import time
 from collections import Counter
 from typing import Optional
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 REPAIR_HISTORY_FILE = os.path.join(os.path.expanduser("~"), ".claude", "cache", "repair-history.json")
 
 
@@ -242,6 +244,7 @@ def suggest_fixes(findings: list[dict], repo: str = "") -> list[dict]:
 
 # ── Commands ─────────────────────────────────────────────────────────
 
+@traced
 def cmd_build(args: list[str]) -> int:
     log_path = ""
     apply_mode = False
@@ -355,6 +358,7 @@ def cmd_build(args: list[str]) -> int:
     return 0
 
 
+@traced
 def cmd_edit(args: list[str]) -> int:
     """repair.py edit <file> --find 'old_str' --replace 'new_str' [--context N]
 
@@ -420,6 +424,7 @@ def cmd_edit(args: list[str]) -> int:
     return 0
 
 
+@traced
 def cmd_classify(args: list[str]) -> int:
     log_path = args[0] if args else ""
     if not log_path:
@@ -439,6 +444,7 @@ def cmd_classify(args: list[str]) -> int:
     return 0
 
 
+@traced
 def cmd_stats(args: list[str]) -> int:
     if not os.path.exists(REPAIR_HISTORY_FILE):
         print(json.dumps({"total_repairs": 0, "history": []}))
@@ -485,6 +491,7 @@ def _save_to_history(log_path: str, result: dict):
 # ── Main ─────────────────────────────────────────────────────────────
 
 def main():
+    _debug_setup()
     if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
         print(__doc__)
         return 0 if sys.argv[1:2] in (["--help"], ["-h"]) else 1

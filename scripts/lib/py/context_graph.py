@@ -41,6 +41,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "cache")
 LIVEMASK_ROOT = os.environ.get("LIVEMASK_ROOT",
                                 os.path.expanduser("~/Developer/LiveMask"))
@@ -683,6 +685,7 @@ def cmd_summary(args: list[str]) -> int:
 
 # ── Main ──────────────────────────────────────────────────────────────
 
+@traced
 def main():
     if len(sys.argv) < 2:
         cmds = ["build", "query", "path", "contradictions", "error-stats", "summary", "tag-tree", "tag-query"]
@@ -720,4 +723,5 @@ def main():
 
 
 if __name__ == "__main__":
+    _debug_setup()
     main()

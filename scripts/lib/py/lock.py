@@ -39,6 +39,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 LOCK_DIR = Path.home() / ".claude" / "locks"
 DEFAULT_TTL = 1800  # 30 minutes
 MAX_TTL = 7200      # 2 hours max lease
@@ -421,6 +423,7 @@ def cmd_heartbeat(args: list[str]) -> int:
 # ── Main ──────────────────────────────────────────────────────────
 
 def main():
+    _debug_setup()
     if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
         print(__doc__)
         return 0 if sys.argv[1:2] in (["--help"], ["-h"]) else 1

@@ -21,7 +21,9 @@ source "${CI_CD_DIR}/scripts/lib/helpers.sh"
 
 log_setup "claude-startup"
 
-DEBUG_LEVEL="${CLAUDE_DEBUG:-0}"
+CLAUDE_DEBUG="${CLAUDE_DEBUG:-0}"
+export CLAUDE_DEBUG  # Propagate to all child shell scripts AND Python subprocesses
+DEBUG_LEVEL="${CLAUDE_DEBUG}"
 
 log_section "Startup Health Check"
 
@@ -62,6 +64,11 @@ PY_TOOLS=(
     "${PY_DIR}/dev_intel.py"
     "${PY_DIR}/knowledge_base.py"
     "${PY_DIR}/log_watch_daemon.py"
+    "${PY_DIR}/webhook_consumer.py"
+    "${PY_DIR}/auto_evidence.py"
+    "${PY_DIR}/auto_implement.py"
+    "${PY_DIR}/self_heal.py"
+    "${PY_DIR}/debug_utils.py"
 )
 
 PY_ERRORS=0

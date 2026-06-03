@@ -17,6 +17,10 @@ Usage:
 import json, os, re, sys, subprocess, glob
 from pathlib import Path
 
+from debug_utils import setup as _debug_setup, traced
+
+_debug_setup()
+
 LIVEMASK_ROOT = os.environ.get(
     "LIVEMASK_ROOT",
     str(Path(__file__).resolve().parent.parent.parent.parent.parent),
@@ -312,6 +316,7 @@ def cmd_detect(tid):
     print(f"AUTO-IMPLEMENTABLE: {tid} (contract: {os.path.basename(i.contract_abs_path)})")
     return 0
 
+@traced
 def cmd_impl(tid):
     i = analyze(tid)
     if not i.auto_implementable: print(f"NO: {i.reason}"); return 1

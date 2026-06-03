@@ -14,6 +14,7 @@ Usage:
 
 import json, os, subprocess, sys, time, hashlib
 from pathlib import Path
+from debug_utils import setup as _debug_setup, traced, logger as _logger
 
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "gh-cache")
 DEFAULT_TTL = 120
@@ -119,6 +120,7 @@ def _run_gh(args):
         return -1, "", str(e)
 
 
+@traced
 def cmd_list(repo, state="open", label="", limit=50, ttl=None):
     if ttl is None:
         ttl = DEFAULT_TTL
@@ -148,6 +150,7 @@ def cmd_list(repo, state="open", label="", limit=50, ttl=None):
         return json.dumps({"error": "parse error", "status": "error"})
 
 
+@traced
 def cmd_view(repo, issue_num, ttl=None):
     if ttl is None:
         ttl = VIEW_TTL
@@ -172,6 +175,7 @@ def cmd_view(repo, issue_num, ttl=None):
         return json.dumps({"error": "parse error", "status": "error"})
 
 
+@traced
 def cmd_search(query, ttl=None):
     if ttl is None:
         ttl = SEARCH_TTL
@@ -196,6 +200,7 @@ def cmd_search(query, ttl=None):
         return json.dumps({"error": "parse error", "status": "error"})
 
 
+@traced
 def cmd_invalidate(repo, issue_num=""):
     cleared = 0
     if not os.path.isdir(CACHE_DIR):
@@ -233,6 +238,7 @@ def cmd_invalidate(repo, issue_num=""):
     return json.dumps({"status": "ok", "cleared": cleared})
 
 
+@traced
 def cmd_clear(older_than=3600):
     if not os.path.isdir(CACHE_DIR):
         return json.dumps({"status": "ok", "cleared": 0})
@@ -317,6 +323,7 @@ def _kv(rest, key, default=None):
 
 
 def main():
+    _debug_setup()
     _ensure_dir()
     if len(sys.argv) < 2:
         print(_HELP); return 0

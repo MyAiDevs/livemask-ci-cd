@@ -29,6 +29,8 @@ import sys
 import time
 from contextlib import contextmanager
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".claude", "cache")
 
 # ── diskcache-backed namespaces ─────────────────────────────────────────
@@ -161,6 +163,7 @@ def cmd_incr(args: list[str]) -> int:
     return 0
 
 
+@traced
 def cmd_stats(args: list[str]) -> int:
     os.makedirs(CACHE_DIR, exist_ok=True)
     namespaces = []
@@ -205,6 +208,7 @@ def _dir_size(path: str) -> int:
 
 
 def main():
+    _debug_setup()
     if len(sys.argv) < 2:
         print(json.dumps({"error": "usage: cache.py <set|get|list|del|incr|stats> [...]"}))
         sys.exit(1)

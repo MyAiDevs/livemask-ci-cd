@@ -10,6 +10,8 @@ import json, re, sys, argparse, os
 from pathlib import Path
 from datetime import datetime, timezone
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 DOCS_DIR = Path(os.environ.get("DOCS_DIR", os.path.expanduser("~/Developer/LiveMask/livemask-docs")))
 CACHE_DIR = Path(os.environ.get("ROLE_CACHE_DIR", os.path.expanduser("~/.claude/role-cache")))
 TASK_DIR = DOCS_DIR / "docs/development/tasks"
@@ -368,7 +370,9 @@ def cmd_create(args):
     }, indent=2))
 
 
+@traced
 def main():
+    _debug_setup()
     parser = argparse.ArgumentParser(description="Task artifact creation")
     sub = parser.add_subparsers(dest="command", required=True)
 

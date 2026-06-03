@@ -12,6 +12,8 @@ import json, sys, os, re, subprocess
 from pathlib import Path
 from datetime import datetime, timezone
 
+from debug_utils import setup as _debug_setup, traced, logger as _logger
+
 DOCS_DIR = Path(os.environ.get("DOCS_DIR", os.path.expanduser("~/Developer/LiveMask/livemask-docs")))
 CACHE_DIR = Path(os.environ.get("ROLE_CACHE_DIR", os.path.expanduser("~/.claude/role-cache")))
 
@@ -87,7 +89,9 @@ def guess_repo(description: str, ttype: str) -> str:
     return TYPE_CONFIG.get(ttype, {}).get("repo_hint", "livemask-backend")
 
 
+@traced
 def main():
+    _debug_setup()
     if len(sys.argv) < 3:
         print("Usage: /mvp <bug|requirement|feature> <description>")
         print(json.dumps({"status": "error", "reason": "missing arguments"}))
