@@ -1043,4 +1043,16 @@ if [[ "${RUN_AUTO_TASK_ASSIGNMENT_SMOKE:-}" == "1" ]]; then
 fi
 
 echo ""
-echo "Smoke PASS: full stack (health + config center + auth/rbac + node agent + billing/devices + connect session + content system + geoip + job-service + dashboard + protocol-endpoint-rollout + protocol-capability + geoip-credentials + nodeagent-release + website-blog + system-settings + scheduler + app-release + sentry-config + observability + i18n-language + bandwidth-auto-reconnect + traffic-analytics-v2 + admin-nav-ia + jobs-hardening + growth-revenue + reward-notification + release-control + connection-quality + nodeagent-config-sync + nat-sharing-guard + nodeagent-speedtest-bandwidth + nodeagent-credential-rotation + real-data-closed-loop + jobs-real-data + node-status-freshness + app-runtime-governance + protocol-parity + log-retention + admin-nodes-ux + website-i18n-announcement + secret-leak-standard + worker-harness)"
+# ── Three-Level Reward Smoke (TASK-CICD-THREE-LEVEL-REWARD-SMOKE-001) ──
+echo "=== Smoke: Three-Level Reward (TASK-CICD-THREE-LEVEL-REWARD-SMOKE-001) ==="
+if bash "${SCRIPT_DIR}/three-level-reward-smoke.sh" 2>&1; then
+  echo "Three-level reward smoke PASSED."
+else
+  tlr_rc=$?
+  echo ""
+  echo "=== Three-Level Reward Smoke FAILED ==="
+  exit ${tlr_rc}
+fi
+
+echo ""
+echo "Smoke PASS: full stack (health + config center + auth/rbac + node agent + billing/devices + connect session + content system + geoip + job-service + dashboard + protocol-endpoint-rollout + protocol-capability + geoip-credentials + nodeagent-release + website-blog + system-settings + scheduler + app-release + sentry-config + observability + i18n-language + bandwidth-auto-reconnect + traffic-analytics-v2 + admin-nav-ia + jobs-hardening + growth-revenue + reward-notification + release-control + connection-quality + nodeagent-config-sync + nat-sharing-guard + nodeagent-speedtest-bandwidth + nodeagent-credential-rotation + real-data-closed-loop + jobs-real-data + node-status-freshness + app-runtime-governance + protocol-parity + log-retention + admin-nodes-ux + website-i18n-announcement + secret-leak-standard + worker-harness + three-level-reward)"
