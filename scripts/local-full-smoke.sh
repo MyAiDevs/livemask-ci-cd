@@ -74,6 +74,7 @@ SMOKE_SCRIPTS=(
   website
   system-settings
   notification-settings
+  payment-settings
   app-release
   sentry-config
   observability
