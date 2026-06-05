@@ -592,6 +592,19 @@ else
 fi
 
 echo ""
+# ── Payment Settings Smoke (TASK-INTK-CI-CD-REQU-ADD-PAYMENT-SETTINGS-20260605140435) ────────────
+echo ""
+echo "=== Smoke: Payment Settings USDT Provider Schema (TASK-INTK-CI-CD-REQU-ADD-PAYMENT-SETTINGS-20260605140435) ==="
+if bash "${SCRIPT_DIR}/payment-settings-smoke.sh" 2>&1; then
+  echo "Payment settings smoke PASSED."
+else
+  payment_settings_rc=$?
+  echo ""
+  echo "=== Payment Settings Smoke FAILED ==="
+  exit ${payment_settings_rc}
+fi
+
+echo ""
 # ── Sentry Config Smoke (TASK-CICD-SENTRY-CONFIG-SMOKE-001) ────────────
 echo ""
 echo "=== Smoke: Sentry Config (TASK-CICD-SENTRY-CONFIG-SMOKE-001) ==="
