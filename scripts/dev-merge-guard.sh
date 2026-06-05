@@ -324,6 +324,14 @@ run_validation "${integration_branch}" "${validation_cmds[@]}"
 integration_commit="$(git_in_repo rev-parse --short HEAD)"
 info "integration validation PASS at ${integration_commit}"
 
+	# ---- Diff-scope gate (TASK-CICD-DIFF-SCOPE-GATE-001) ----
+	if [[ -x "${SCRIPT_DIR}/lib/verify-diff-scope.sh" ]]; then
+		if ! bash "${SCRIPT_DIR}/lib/verify-diff-scope.sh" --repo "${repo}" --task-id "${task_id}"; then
+			die "diff-scope gate failed for ${task_id}: changed files do not match claimed scope"
+		fi
+	fi
+
+
 if [[ "${push_dev}" != "true" ]]; then
   cat <<EOF
 
