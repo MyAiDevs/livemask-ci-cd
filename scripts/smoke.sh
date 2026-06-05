@@ -579,6 +579,19 @@ else
 fi
 
 echo ""
+# ── Notification Settings Smoke (TASK-INTK-CI-CD-REQU-ADD-NOTIFICATION-SETTINGS-20260605140104) ────────────
+echo ""
+echo "=== Smoke: Notification Settings Provider Schema (TASK-INTK-CI-CD-REQU-ADD-NOTIFICATION-SETTINGS-20260605140104) ==="
+if bash "${SCRIPT_DIR}/notification-settings-smoke.sh" 2>&1; then
+  echo "Notification settings smoke PASSED."
+else
+  notification_settings_rc=$?
+  echo ""
+  echo "=== Notification Settings Smoke FAILED ==="
+  exit ${notification_settings_rc}
+fi
+
+echo ""
 # ── Sentry Config Smoke (TASK-CICD-SENTRY-CONFIG-SMOKE-001) ────────────
 echo ""
 echo "=== Smoke: Sentry Config (TASK-CICD-SENTRY-CONFIG-SMOKE-001) ==="

@@ -73,6 +73,7 @@ SMOKE_SCRIPTS=(
   nodeagent-release
   website
   system-settings
+  notification-settings
   app-release
   sentry-config
   observability
