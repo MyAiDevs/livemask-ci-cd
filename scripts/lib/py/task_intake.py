@@ -388,6 +388,16 @@ def _create_task_doc(tid: str, title: str, body: str, ttype: str,
     if val_cmds:
         val_section = "### Validation\n\n" + "\n".join(f"```bash\n{c.strip()}\n```" for c in val_cmds)
 
+    # ── Generate structured acceptance criteria ──────────────────────────
+    # If the body doesn't already have checkboxes, generate concrete ones.
+    # NEVER fall back to generic "verify implementation" — that lets Claude
+    # claim completion for anything.
+    if not criteria_section:
+        criteria_section = _generate_acceptance_criteria(body, ttype, repo, tags)
+
+    # ── Cross-repo impact table ─────────────────────────────────────────
+    cross_repo_section = _generate_cross_repo_table(repo, tags, body)
+
     doc_content = f"""# {title}
 
 ## Overview
@@ -409,9 +419,13 @@ def _create_task_doc(tid: str, title: str, body: str, ttype: str,
 
 ---
 
-## Acceptance Criteria
+## Acceptance Criteria (EVERY item must be verified before completion)
 
-{criteria_section if criteria_section else "- [ ] Verify implementation meets requirements\n- [ ] All tests pass\n- [ ] No regressions introduced"}
+{criteria_section}
+
+## Cross-Repo Verification
+
+{cross_repo_section}
 
 {val_section}
 
@@ -565,6 +579,120 @@ def _run_tags_enrich(tid: str, tags: list[str]):
     _python_tool("tags.py", "tag", tid, ",".join(tags),
                  "--source", "intake",
                  "--meta", f"source:task_intake")
+
+
+# ── Acceptance criteria generation ────────────────────────────────────────
+
+def _generate_acceptance_criteria(body: str, ttype: str, repo: str, tags: list[str]) -> str:
+    """Generate structured, non-compressible acceptance criteria.
+
+    NEVER falls back to generic 'verify implementation meets requirements'.
+    Every criterion is concrete and testable — Claude cannot claim completion
+    without satisfying each one.
+    """
+    lines = []
+    body_lower = body.lower()
+    tags_lower = [t.lower() for t in tags]
+
+    # Always include these base criteria
+    lines.append("- [ ] Build passes: repo-native build command succeeds")
+    lines.append("- [ ] Tests pass: repo-native test suite passes with no regressions")
+    lines.append("- [ ] No raw i18n keys leaked in rendered pages (negative assertion)")
+    lines.append("- [ ] No mock data fallback in production code paths (negative assertion)")
+
+    # Domain-specific criteria based on tags and body content
+    if "api" in tags_lower or "backend" in repo.lower() or "livemask-backend" in repo:
+        lines.append("- [ ] API endpoint returns correct HTTP status and response shape")
+        lines.append("- [ ] RBAC permissions checked: request without proper auth returns 401/403")
+        lines.append("- [ ] Idempotency: duplicate requests produce same result, no double-write")
+
+    if "ui" in tags_lower or "admin" in repo.lower() or "livemask-admin" in repo:
+        lines.append("- [ ] Page renders in browser with correct H1 heading matching task scope")
+        lines.append("- [ ] All filter/sort/pagination controls visible and functional")
+        lines.append("- [ ] Loading state shown during data fetch")
+        lines.append("- [ ] Error state shown when API fails (not blank page)")
+        lines.append("- [ ] Permission-denied state shown when user lacks RBAC")
+
+    if "billing" in body_lower or "payment" in body_lower or "finance" in body_lower:
+        lines.append("- [ ] Period filter tabs present (day/week/month/quarter/year)")
+        lines.append("- [ ] Revenue breakdown shows subscription/promotion/sponsor split")
+        lines.append("- [ ] Settlement status summary: pending/approved/paid counts")
+        lines.append("- [ ] Order detail: plan_id, amount, status, created_at visible")
+
+    if "settlement" in body_lower or "withdrawal" in body_lower or "password" in body_lower:
+        lines.append("- [ ] Sensitive fields (password, secret, key) never returned in API responses")
+        lines.append("- [ ] Audit log entry created for every mutation")
+
+    if "kpi" in body_lower or "dashboard" in body_lower or "report" in body_lower:
+        lines.append("- [ ] KPI cards show real data from backend API (not hardcoded)")
+        lines.append("- [ ] Period selector changes data range")
+        lines.append("- [ ] ARPU, conversion rate, trends computed from real data")
+
+    if "market" in body_lower or "c2c" in body_lower or "points market" in body_lower:
+        lines.append("- [ ] Listing create → admin approve → buyer purchase flow works end-to-end")
+        lines.append("- [ ] Escrow debit on purchase, seller credit on fulfillment")
+        lines.append("- [ ] Refund reverses ledger rows, dispute links support ticket")
+
+    if "reward" in body_lower or "kpi penalty" in body_lower or "ambassador" in body_lower:
+        lines.append("- [ ] L1/L2/L3 attribution frozen at event time, not recomputed later")
+        lines.append("- [ ] USDT and points ledgers are separate and independently auditable")
+        lines.append("- [ ] Penalty mode (withhold/reversal/manual_review) produces distinct rows")
+
+    if "nodeagent" in body_lower or "log" in body_lower or "upload" in body_lower:
+        lines.append("- [ ] Log upload loop actually starts (check container logs)")
+        lines.append("- [ ] Admin logs page shows uploaded entries with correct source=nodeagent")
+        lines.append("- [ ] No secret/credential in log entries or metadata")
+
+    # Cross-repo criteria
+    if len([r for r in ["admin", "backend", "nodeagent", "job-service", "website", "app"] if r in body_lower or r in str(tags_lower)]) >= 3:
+        lines.append("- [ ] ALL mentioned repos have commits related to this task")
+        lines.append("- [ ] End-to-end flow verified: frontend → backend → job → nodeagent")
+
+    # Negative assertions (always)
+    lines.append("- [ ] Negative test: feature absence causes specific test failure, not silent pass")
+    lines.append("- [ ] No secrets, wallet addresses, private keys, or internal endpoints in any response")
+
+    return "\n".join(lines)
+
+
+def _generate_cross_repo_table(repo: str, tags: list[str], body: str) -> str:
+    """Generate the cross-repo impact table for the task doc."""
+    all_repos = [
+        "livemask-backend", "livemask-admin", "livemask-website",
+        "livemask-app", "livemask-nodeagent", "livemask-job-service",
+        "livemask-ci-cd", "livemask-docs",
+    ]
+
+    # Determine which repos are impacted
+    impacted = set()
+    impacted.add(repo)  # primary repo always
+
+    body_lower = body.lower()
+    tags_lower = [t.lower() for t in tags]
+
+    repo_keywords = {
+        "livemask-backend": ["api", "backend", "server", "database", "auth", "endpoint", "handler"],
+        "livemask-admin": ["admin", "dashboard", "ui", "page", "settings", "navigation"],
+        "livemask-website": ["website", "landing", "marketing", "public", "blog", "seo"],
+        "livemask-app": ["app", "flutter", "mobile", "client", "android", "ios"],
+        "livemask-nodeagent": ["nodeagent", "node", "agent", "sing-box", "log upload"],
+        "livemask-job-service": ["job", "worker", "scheduler", "executor", "cron", "settlement"],
+        "livemask-ci-cd": ["ci", "cd", "smoke", "pipeline", "test", "deploy", "docker"],
+        "livemask-docs": ["docs", "contract", "documentation", "governance", "ledger"],
+    }
+
+    for r, keywords in repo_keywords.items():
+        if any(k in body_lower or k in str(tags_lower) for k in keywords):
+            impacted.add(r)
+
+    table = "| Repo | Impact | Verified |\n| --- | --- | --- |\n"
+    for r in sorted(impacted):
+        table += f"| `{r}` | Required — must have changes merged | [ ] |\n"
+    for r in sorted(set(all_repos) - impacted):
+        table += f"| `{r}` | Monitor only — no changes expected | N/A |\n"
+
+    table += "\n**Parent/Epic Rule**: This task cannot be marked completed until ALL 'Required' repos above have verified changes merged to origin/dev."
+    return table
 
 
 # ── Core intake function ──────────────────────────────────────────────────
