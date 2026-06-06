@@ -215,6 +215,77 @@ USDT_ENT_STATUS=$(pg_exec -c "SELECT status FROM user_traffic_entitlements WHERE
 [[ "${USDT_ENT_STATUS}" == "active" ]] && pass "usdt entitlement active" || fail "usdt entitlement (${USDT_ENT_STATUS})"
 
 echo ""
+echo "--- [10] Admin commerce package CRUD + USDT order ---"
+PKG_KEY="smoke-usdt-pack-$(date +%s)"
+CREATE_PKG=$(curl -sS --max-time 10 -X POST "${API_BASE}/admin/api/v1/packages" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"package_key\":\"${PKG_KEY}\",\"display_name\":\"Smoke USDT Pack\",\"description\":\"smoke\",\"usdt_price_amount\":\"19.99\",\"points_grant\":2500}") || true
+PKG_ID=$(echo "${CREATE_PKG}" | quiet_json "id")
+PKG_STATUS=$(echo "${CREATE_PKG}" | quiet_json "status")
+[[ -n "${PKG_ID}" && "${PKG_STATUS}" == "draft" ]] && pass "admin create draft package ${PKG_ID}" || fail "admin create package (${CREATE_PKG})"
+UPDATE_PKG=$(curl -sS --max-time 10 -X PUT "${API_BASE}/admin/api/v1/packages/${PKG_ID}" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"display_name":"Smoke USDT Pack Updated","points_grant":3000}') || true
+UPDATED_GRANT=$(echo "${UPDATE_PKG}" | quiet_json "points_grant")
+[[ "${UPDATED_GRANT}" == "3000" ]] && pass "admin update package" || fail "admin update (${UPDATE_PKG})"
+PUBLISH_PKG=$(curl -sS --max-time 10 -X POST "${API_BASE}/admin/api/v1/packages/${PKG_ID}/publish" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+PUBLISHED_STATUS=$(echo "${PUBLISH_PKG}" | quiet_json "status")
+[[ "${PUBLISHED_STATUS}" == "active" ]] && pass "admin publish package" || fail "admin publish (${PUBLISH_PKG})"
+COMM_USDT_ORDER=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/package-orders" \
+  -H "Authorization: Bearer ${USDT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"package_id\":\"${PKG_ID}\",\"idempotency_key\":\"comm-usdt-$(date +%s)\",\"payment_method\":\"usdt\"}") || true
+COMM_ORDER_STATUS=$(echo "${COMM_USDT_ORDER}" | quiet_json "order.status")
+COMM_ORDER_USDT=$(echo "${COMM_USDT_ORDER}" | quiet_json "order.amount_usdt")
+[[ "${COMM_ORDER_STATUS}" == "pending_payment" ]] && pass "commerce usdt pending order" || fail "commerce usdt order (${COMM_ORDER_STATUS})"
+[[ -n "${COMM_ORDER_USDT}" && "${COMM_ORDER_USDT}" != "0" ]] && pass "commerce usdt amount (${COMM_ORDER_USDT})" || fail "commerce usdt amount"
+COMM_RECON=$(curl -sS --max-time 10 -X POST "${API_BASE}/internal/job-executors/commerce/package-order-reconcile" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d '{}') || true
+COMM_RECON_OK=$(echo "${COMM_RECON}" | quiet_json "ok")
+[[ "${COMM_RECON_OK}" == "True" || "${COMM_RECON_OK}" == "true" ]] && pass "commerce package-order-reconcile ok" || fail "commerce reconcile (${COMM_RECON})"
+
+echo ""
+echo "--- [11] Gate D — NodeAgent usage report (HMAC) ---"
+NODE_REG=$(curl -sS --max-time 5 -X POST "${API_BASE}/internal/agent/register" \
+  -H "Content-Type: application/json" \
+  -d '{"node_name":"traffic-smoke-node","agent_version":"smoke-1.0.0"}') || true
+NODE_ID=$(echo "${NODE_REG}" | quiet_json "node_id")
+NODE_SECRET=$(echo "${NODE_REG}" | quiet_json "node_secret")
+if [[ -n "${NODE_ID}" && -n "${NODE_SECRET}" ]]; then
+  HB_TS=$(date +%s)
+  NODE_SECRET_HASH=$(echo -n "${NODE_SECRET}" | sha256sum | cut -d' ' -f1)
+  HB_SIG=$(python3 -c "import hmac,hashlib; print(hmac.new('${NODE_SECRET_HASH}'.encode(),'${NODE_ID}:${HB_TS}'.encode(),hashlib.sha256).hexdigest())")
+  curl -sS --max-time 5 -X POST "${API_BASE}/internal/agent/heartbeat" \
+    -H "Content-Type: application/json" \
+    -H "X-Node-ID: ${NODE_ID}" \
+    -H "X-Signature: ${HB_SIG}" \
+    -H "X-Timestamp: ${HB_TS}" \
+    -d '{"agent_version":"smoke-1.0.0","config_version":1,"singbox_status":"running","load_score":10}' >/dev/null || true
+  USAGE_BEFORE=$(pg_exec -c "SELECT COALESCE(traffic_used_bytes,0) FROM user_traffic_entitlements WHERE user_id='${USDT_ID}' ORDER BY created_at DESC LIMIT 1")
+  USAGE_DELTA=2048
+  USAGE_TS=$(date +%s)
+  USAGE_SIG=$(python3 -c "import hmac,hashlib; print(hmac.new('${NODE_SECRET_HASH}'.encode(),'${NODE_ID}:${USAGE_TS}'.encode(),hashlib.sha256).hexdigest())")
+  AGENT_USAGE=$(curl -sS --max-time 10 -X POST "${API_BASE}/internal/agent/traffic-usage/report" \
+    -H "Content-Type: application/json" \
+    -H "X-Node-ID: ${NODE_ID}" \
+    -H "X-Signature: ${USAGE_SIG}" \
+    -H "X-Timestamp: ${USAGE_TS}" \
+    -d "{\"user_id\":\"${USDT_ID}\",\"session_id\":\"smoke-session\",\"bytes_used\":${USAGE_DELTA},\"bandwidth_limit_mbps\":10,\"speed_limit_supported\":true}") || true
+  AGENT_OK=$(echo "${AGENT_USAGE}" | quiet_json "ok")
+  USAGE_AFTER=$(pg_exec -c "SELECT COALESCE(traffic_used_bytes,0) FROM user_traffic_entitlements WHERE user_id='${USDT_ID}' ORDER BY created_at DESC LIMIT 1")
+  EXPECTED_AFTER=$((USAGE_BEFORE + USAGE_DELTA))
+  [[ "${AGENT_OK}" == "True" || "${AGENT_OK}" == "true" ]] && pass "nodeagent usage report ok" || fail "nodeagent usage (${AGENT_USAGE})"
+  [[ "${USAGE_AFTER}" == "${EXPECTED_AFTER}" ]] && pass "traffic_used_bytes incremented (${USAGE_AFTER})" || fail "usage bytes before=${USAGE_BEFORE} after=${USAGE_AFTER}"
+else
+  fail "node register for Gate D (${NODE_REG})"
+fi
+
+echo ""
 echo "========================================"
 printf '%s\n' "${SUMMARY_LINES[@]}"
 if [[ "${FAILED}" -ne 0 ]]; then

@@ -1096,14 +1096,14 @@ if [[ "${RUN_AUTO_TASK_ASSIGNMENT_SMOKE:-}" == "1" ]]; then
 fi
 
 echo ""
-# ── C2C Points Market Smoke (TASK-C2C-POINTS-MARKET-PORTAL-AND-SMOKE-001) ──
-echo "=== Smoke: C2C Points Market (listing → escrow → settle) ==="
-if bash "${SCRIPT_DIR}/c2c-points-market-smoke.sh" 2>&1; then
-  echo "C2C points market smoke PASSED."
+# ── VPN/C2C Closed Loop (Gates A+B+C+D via traffic orchestrator) ──
+echo "=== Smoke: VPN/C2C Closed Loop (Gates A+B+C, Gate D in traffic smoke) ==="
+if bash "${SCRIPT_DIR}/vpn-c2c-closed-loop-smoke.sh" 2>&1; then
+  echo "VPN/C2C closed loop smoke PASSED."
 else
   c2c_rc=$?
   echo ""
-  echo "=== C2C Points Market Smoke FAILED ==="
+  echo "=== VPN/C2C Closed Loop Smoke FAILED ==="
   exit ${c2c_rc}
 fi
 
@@ -1120,4 +1120,4 @@ else
 fi
 
 echo ""
-echo "Smoke PASS: full stack (health + config center + auth/rbac + node agent + billing/devices + connect session + content system + geoip + job-service + dashboard + protocol-endpoint-rollout + protocol-capability + geoip-credentials + admin-jobs-geoip + nodeagent-release + website-blog + system-settings + scheduler + app-release + sentry-config + observability + i18n-language + bandwidth-auto-reconnect + traffic-analytics-v2 + admin-nav-ia + jobs-hardening + growth-revenue + reward-notification + release-control + connection-quality + nodeagent-config-sync + nat-sharing-guard + nodeagent-speedtest-bandwidth + nodeagent-credential-rotation + real-data-closed-loop + jobs-real-data + node-status-freshness + app-runtime-governance + protocol-parity + log-retention + admin-nodes-ux + website-i18n-announcement + secret-leak-standard + worker-harness + three-level-reward)"
+echo "Smoke PASS: full stack (health + config center + auth/rbac + node agent + billing/devices + connect session + content system + geoip + job-service + dashboard + protocol-endpoint-rollout + protocol-capability + geoip-credentials + admin-jobs-geoip + nodeagent-release + website-blog + system-settings + scheduler + app-release + sentry-config + observability + i18n-language + bandwidth-auto-reconnect + traffic-analytics-v2 + admin-nav-ia + jobs-hardening + growth-revenue + reward-notification + release-control + connection-quality + nodeagent-config-sync + nat-sharing-guard + nodeagent-speedtest-bandwidth + nodeagent-credential-rotation + real-data-closed-loop + jobs-real-data + node-status-freshness + app-runtime-governance + protocol-parity + log-retention + admin-nodes-ux + website-i18n-announcement + secret-leak-standard + worker-harness + vpn-c2c-closed-loop + three-level-reward)"
