@@ -5,6 +5,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_ROOT="${BACKEND_ROOT:-${SCRIPT_DIR}/../../livemask-backend}"
 COMPOSE_FILE="${COMPOSE_FILE:-${SCRIPT_DIR}/../infra/docker-compose.local.yml}"
+if [[ "${COMPOSE_FILE}" != /* ]]; then
+  COMPOSE_FILE="${SCRIPT_DIR}/../${COMPOSE_FILE}"
+fi
+COMPOSE_FILE="$(cd "$(dirname "${COMPOSE_FILE}")" && pwd)/$(basename "${COMPOSE_FILE}")"
 BACKEND_HTTP_PORT="${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
 API_BASE="http://127.0.0.1:${BACKEND_HTTP_PORT}"
 INTERNAL_SECRET="${INTERNAL_JOB_SECRET:-${INTERNAL_SERVICE_SECRET:-local-dev-secret}}"
@@ -42,8 +46,7 @@ echo "========================================"
 
 echo ""
 echo "--- [unit] trafficpackage + commerce tests ---"
-cd "$BACKEND_ROOT"
-go test ./internal/trafficpackage/... ./internal/commerce/... -count=1 -timeout 3m
+( cd "$BACKEND_ROOT" && go test ./internal/trafficpackage/... ./internal/commerce/... ./internal/bankcard/... ./internal/support/... -count=1 -timeout 3m )
 pass "unit tests"
 
 echo ""
@@ -304,6 +307,45 @@ SLA_OK=$(echo "${SLA_JOB}" | quiet_json "ok")
 SLA_PRIO=$(pg_exec -c "SELECT priority FROM support_tickets WHERE title='bridge-sla-smoke' LIMIT 1")
 [[ "${SLA_OK}" == "True" || "${SLA_OK}" == "true" ]] && pass "ticket-sla-scan ok" || fail "ticket-sla-scan (${SLA_JOB})"
 [[ "${SLA_PRIO}" == "high" ]] && pass "ticket priority escalated to high" || fail "ticket priority (${SLA_PRIO})"
+
+echo ""
+echo "--- [13] Bank card draft → confirm → admin approve ---"
+CREATE_CARD=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/me/bank-cards" \
+  -H "Authorization: Bearer ${BUYER_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"holder_name":"Bridge Buyer","bank_name":"Test Bank","card_number":"6222021234567890"}') || true
+CARD_ID=$(echo "${CREATE_CARD}" | quiet_json "id")
+CARD_STATUS=$(echo "${CREATE_CARD}" | quiet_json "status")
+CARD_MASKED=$(echo "${CREATE_CARD}" | quiet_json "card_number_masked")
+[[ -n "${CARD_ID}" && "${CARD_STATUS}" == "draft" ]] && pass "bank card draft ${CARD_ID}" || fail "bank card create (${CREATE_CARD})"
+[[ "${CARD_MASKED}" == *"****"* ]] && pass "bank card masked (${CARD_MASKED})" || fail "bank card mask leak (${CARD_MASKED})"
+CONFIRM_CARD=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/me/bank-cards/${CARD_ID}/confirm" \
+  -H "Authorization: Bearer ${BUYER_TOKEN}") || true
+CONFIRM_STATUS=$(echo "${CONFIRM_CARD}" | quiet_json "status")
+[[ "${CONFIRM_STATUS}" == "pending_review" ]] && pass "bank card pending_review" || fail "bank card confirm (${CONFIRM_CARD})"
+APPROVE_CARD=$(curl -sS --max-time 10 -X POST "${API_BASE}/admin/api/v1/users/${BUYER_ID}/bank-cards/${CARD_ID}/approve" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+APPROVE_STATUS=$(echo "${APPROVE_CARD}" | quiet_json "status")
+[[ "${APPROVE_STATUS}" == "verified" ]] && pass "bank card verified" || fail "bank card approve (${APPROVE_CARD})"
+
+echo ""
+echo "--- [14] Support ticket create + admin transition ---"
+CREATE_TICKET=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/support/tickets" \
+  -H "Authorization: Bearer ${BUYER_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"category":"points","priority":"normal","title":"bridge-support-smoke"}') || true
+TICKET_ID=$(echo "${CREATE_TICKET}" | quiet_json "id")
+[[ -n "${TICKET_ID}" ]] && pass "support ticket created ${TICKET_ID}" || fail "support ticket create (${CREATE_TICKET})"
+ADMIN_TICKETS=$(curl -sS --max-time 10 -X GET "${API_BASE}/admin/api/v1/support/tickets" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+ADMIN_HAS=$(echo "${ADMIN_TICKETS}" | python3 -c "import sys,json; d=json.load(sys.stdin); ids=[t.get('id') for t in (d.get('tickets') or [])]; print('1' if '${TICKET_ID}' in ids else '0')" 2>/dev/null || echo "0")
+[[ "${ADMIN_HAS}" == "1" ]] && pass "admin lists support ticket" || fail "admin support list (${ADMIN_TICKETS})"
+TRANS_TICKET=$(curl -sS --max-time 10 -X POST "${API_BASE}/admin/api/v1/support/tickets/${TICKET_ID}/transition" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"triage"}') || true
+TRANS_STATUS=$(echo "${TRANS_TICKET}" | quiet_json "status")
+[[ "${TRANS_STATUS}" == "triage" ]] && pass "support ticket transitioned to triage" || fail "support transition (${TRANS_TICKET})"
 
 echo ""
 echo "--- [7] Idempotent package replay (no double return) ---"
