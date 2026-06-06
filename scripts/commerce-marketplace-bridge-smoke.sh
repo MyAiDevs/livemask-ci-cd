@@ -415,6 +415,21 @@ REP_TYPE=$(echo "${BILL_REP_DETAIL}" | quiet_json "report_type")
 [[ "${REP_TYPE}" == "system_total" ]] && pass "billing report detail system_total" || fail "billing report detail (${BILL_REP_DETAIL})"
 
 echo ""
+echo "--- [20] User billing summary (owner-only) ---"
+ME_BILL=$(curl -sS --max-time 10 -X GET "${API_BASE}/api/v1/me/billing/summary" \
+  -H "Authorization: Bearer ${BUYER_TOKEN}") || true
+ME_USER=$(echo "${ME_BILL}" | quiet_json "user_id")
+[[ "${ME_USER}" == "${BUYER_ID}" ]] && pass "me billing summary user_id" || fail "me billing summary user (${ME_BILL})"
+ME_AVAIL=$(echo "${ME_BILL}" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('points') or {}).get('available_balance',0))" 2>/dev/null || echo "0")
+[[ "${ME_AVAIL}" -ge 1 ]] 2>/dev/null && pass "me billing points available (${ME_AVAIL})" || fail "me billing points (${ME_BILL})"
+ME_PKG_CNT=$(echo "${ME_BILL}" | quiet_json "package_orders_count")
+[[ "${ME_PKG_CNT}" -ge 1 ]] 2>/dev/null && pass "me billing package_orders (${ME_PKG_CNT})" || fail "me billing orders (${ME_BILL})"
+ME_TRAFFIC=$(echo "${ME_BILL}" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('traffic_package') or {}).get('status',''))" 2>/dev/null || echo "")
+[[ "${ME_TRAFFIC}" == "active" ]] && pass "me billing traffic active" || fail "me billing traffic (${ME_BILL})"
+ADMIN_ME_BILL=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" -X GET "${API_BASE}/api/v1/me/billing/summary") || true
+[[ "${ADMIN_ME_BILL}" == "401" || "${ADMIN_ME_BILL}" == "403" ]] && pass "me billing requires auth (${ADMIN_ME_BILL})" || fail "me billing auth leak (${ADMIN_ME_BILL})"
+
+echo ""
 echo "--- [7] Idempotent package replay (no double return) ---"
 PKG_ORDER2=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
   -H "Authorization: Bearer ${BUYER_TOKEN}" \
