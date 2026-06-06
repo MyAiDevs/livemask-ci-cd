@@ -443,6 +443,24 @@ BUYER_AMB_TOTAL=$(echo "${BUYER_AMB}" | quiet_json "total")
 [[ "${BUYER_AMB_TOTAL}" -ge 0 ]] 2>/dev/null && pass "buyer ambassador ledger scoped (${BUYER_AMB_TOTAL})" || fail "buyer ambassador ledger (${BUYER_AMB})"
 
 echo ""
+echo "--- [22] Billing report approve (admin payment:write) ---"
+# Pick a draft report for approval (may reuse REPORT_ID from [19] if still draft)
+DRAFT_ID=$(echo "${BILL_REPORTS}" | python3 -c "import sys,json; d=json.load(sys.stdin); rs=[r for r in (d.get('reports') or []) if r.get('status')=='draft']; print(rs[0]['id'] if rs else '')" 2>/dev/null || echo "")
+[[ -z "${DRAFT_ID}" ]] && DRAFT_ID="${REPORT_ID}"
+APPROVE_REP=$(curl -sS --max-time 10 -X POST "${API_BASE}/admin/api/v1/billing/reports/${DRAFT_ID}/approve" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+APPROVE_STATUS=$(echo "${APPROVE_REP}" | quiet_json "status")
+[[ "${APPROVE_STATUS}" == "approved" ]] && pass "billing report approved (${DRAFT_ID})" || fail "billing report approve (${APPROVE_REP})"
+APPROVE_BY=$(echo "${APPROVE_REP}" | quiet_json "approved_by")
+[[ -n "${APPROVE_BY}" ]] && pass "billing report approved_by set" || fail "billing report approved_by (${APPROVE_REP})"
+BUYER_APPROVE=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/admin/api/v1/billing/reports/${DRAFT_ID}/approve" \
+  -H "Authorization: Bearer ${BUYER_TOKEN}") || true
+[[ "${BUYER_APPROVE}" == "403" || "${BUYER_APPROVE}" == "401" ]] && pass "buyer blocked on report approve (${BUYER_APPROVE})" || fail "report approve RBAC (${BUYER_APPROVE})"
+REAPPROVE=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/admin/api/v1/billing/reports/${DRAFT_ID}/approve" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+[[ "${REAPPROVE}" == "200" || "${REAPPROVE}" == "409" ]] && pass "re-approve idempotent (${REAPPROVE})" || fail "re-approve (${REAPPROVE})"
+
+echo ""
 echo "--- [7] Idempotent package replay (no double return) ---"
 PKG_ORDER2=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
   -H "Authorization: Bearer ${BUYER_TOKEN}" \
