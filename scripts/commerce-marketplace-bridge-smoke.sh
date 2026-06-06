@@ -165,6 +165,50 @@ FINAL_STATUS=$(pg_exec -c "SELECT status FROM points_market_orders WHERE id='${C
 [[ "${FINAL_STATUS}" == "settled" ]] && pass "c2c order settled" || fail "c2c final status (${FINAL_STATUS})"
 
 echo ""
+echo "--- [8] Growth ambassador: referral → package_paid → aggregate → ledger ---"
+L1_EMAIL="bridge-smoke-l1@test.livemask"
+L1_PASS="BridgeSmokeL1!"
+REF_EMAIL="bridge-smoke-ref@test.livemask"
+REF_PASS="BridgeSmokeRef!"
+pg_exec -c "DELETE FROM users WHERE email IN ('${L1_EMAIL}','${REF_EMAIL}')" >/dev/null || true
+L1_REG=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/auth/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"request_id\":\"bridge-l1\",\"email\":\"${L1_EMAIL}\",\"password\":\"${L1_PASS}\",\"display_name\":\"Bridge L1\",\"client_type\":\"app\"}") || true
+L1_TOKEN=$(echo "${L1_REG}" | quiet_json "access_token")
+L1_ID=$(echo "${L1_REG}" | quiet_json "user.user_id")
+REF_CODE=$(curl -sS --max-time 5 "${API_BASE}/api/v1/me/referral-link" \
+  -H "Authorization: Bearer ${L1_TOKEN}" | quiet_json "code")
+REF_REG=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/auth/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"request_id\":\"bridge-ref\",\"email\":\"${REF_EMAIL}\",\"password\":\"${REF_PASS}\",\"display_name\":\"Bridge Ref\",\"client_type\":\"app\",\"referral_code\":\"${REF_CODE}\"}") || true
+REF_TOKEN=$(echo "${REF_REG}" | quiet_json "access_token")
+REF_ID=$(echo "${REF_REG}" | quiet_json "user.user_id")
+[[ -n "${L1_ID}" && -n "${REF_CODE}" && -n "${REF_ID}" ]] && pass "referral chain L1=${L1_ID} ref=${REF_ID}" || fail "referral chain setup"
+
+REF_SEED=$((POINTS_PRICE + POINTS_RETURN + 5000))
+pg_exec -c "DELETE FROM points_ledger WHERE user_id='${REF_ID}'" >/dev/null || true
+pg_exec -c "INSERT INTO points_ledger (id, user_id, direction, amount, balance_after, source_type, source_id, status, created_at) VALUES (gen_random_uuid(), '${REF_ID}', 'credit', ${REF_SEED}, ${REF_SEED}, 'manual_adjustment', 'bridge-growth-seed', 'posted', now())" >/dev/null
+IDEM_GROWTH="bridge-growth-$(date +%s)"
+GROWTH_PKG=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
+  -H "Authorization: Bearer ${REF_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"plan_id\":\"${PLAN_ID}\",\"idempotency_key\":\"${IDEM_GROWTH}\",\"payment_method\":\"points\"}") || true
+GROWTH_ORDER_ID=$(echo "${GROWTH_PKG}" | quiet_json "order.id")
+SNAP_COUNT=$(pg_exec -c "SELECT COUNT(*) FROM growth_attribution_snapshots WHERE source_event_id='package_paid:${GROWTH_ORDER_ID}'")
+[[ -n "${GROWTH_ORDER_ID}" && "${SNAP_COUNT}" == "1" ]] && pass "package_paid attribution snapshot" || fail "package_paid snapshot (order=${GROWTH_ORDER_ID}, count=${SNAP_COUNT})"
+
+AGG=$(curl -sS --max-time 10 -X POST "${API_BASE}/internal/job-executors/growth/ambassador-reward-aggregate" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d '{"limit":20}') || true
+AGG_OK=$(echo "${AGG}" | quiet_json "ok")
+AGG_COUNT=$(echo "${AGG}" | quiet_json "processed_count")
+[[ "${AGG_OK}" == "True" || "${AGG_OK}" == "true" ]] && pass "ambassador reward aggregate (processed=${AGG_COUNT})" || fail "ambassador reward aggregate"
+
+L1_LEDGER=$(pg_exec -c "SELECT points_delta FROM growth_points_ledger WHERE user_id='${L1_ID}' AND source_event_id='package_paid:${GROWTH_ORDER_ID}' AND attribution_level='l1' LIMIT 1")
+[[ "${L1_LEDGER}" == "100" ]] && pass "L1 growth_points_ledger=100" || fail "L1 ledger (got ${L1_LEDGER}, want 100)"
+
+echo ""
 echo "--- [7] Idempotent package replay (no double return) ---"
 PKG_ORDER2=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
   -H "Authorization: Bearer ${BUYER_TOKEN}" \
