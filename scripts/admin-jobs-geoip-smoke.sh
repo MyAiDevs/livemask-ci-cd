@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # TASK-CICD-ADMIN-JOBS-GEOIP-REGRESSION-SMOKE-001
+# TASK-DOC-GEOIP-APP-MULTI-SOURCE-COMPAT-001 (operator workflow E2E)
 # Admin Jobs i18n + GeoIP regression smoke
 set -euo pipefail
 
@@ -40,10 +41,29 @@ fi
 
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
 
-# [3] GeoIP — no contradictory count + empty state
-echo "--- [3] GeoIP regression ---"
+# [3] GeoIP sources — multi-source allowlist + credential entry
+echo "--- [3] GeoIP sources (multi-source) ---"
+SOURCES_HTTP=$(curl -sS --max-time 10 -o /tmp/geoip-sources-smoke.json -w "%{http_code}" \
+  "${API_BASE}/admin/api/v1/geoip/sources" -H "${AUTH_HEADER}" 2>/dev/null || echo "000")
+if [[ "${SOURCES_HTTP}" == "200" ]]; then
+  SOURCE_COUNT=$(python3 -c "import json; d=json.load(open('/tmp/geoip-sources-smoke.json')); s=d.get('sources',[]); print(len(s) if isinstance(s,list) else 0)" 2>/dev/null || echo "0")
+  if [[ "${SOURCE_COUNT}" -ge 2 ]]; then
+    pass "GeoIP sources: ${SOURCE_COUNT} allowlisted source(s)"
+  else
+    fail "GeoIP sources: expected >=2 allowlisted sources, got ${SOURCE_COUNT}"
+  fi
+  SOURCES_PAGE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 "${ADMIN_BASE}/admin/geoip/sources" -H "${AUTH_HEADER}" 2>/dev/null || echo "000")
+  [[ "${SOURCES_PAGE}" == "200" ]] && pass "/admin/geoip/sources returns 200" || fail "/admin/geoip/sources returns ${SOURCES_PAGE}"
+else
+  fail "GeoIP sources API HTTP ${SOURCES_HTTP}"
+fi
+
+# [4] GeoIP databases — items contract + empty-state consistency
+echo "--- [4] GeoIP databases regression ---"
 GEOIP=$(curl -sS --max-time 10 "${API_BASE}/admin/api/v1/geoip/databases" -H "${AUTH_HEADER}" 2>/dev/null || echo "{}")
-DB_COUNT=$(echo "${GEOIP}" | python3 -c "import json; d=json.load(sys.stdin); print(len(d.get('databases',[])))" 2>/dev/null || echo "0")
+HAS_ITEMS=$(echo "${GEOIP}" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if isinstance(d.get('items'),list) else 'no')" 2>/dev/null || echo "no")
+[[ "${HAS_ITEMS}" == "yes" ]] && pass "GeoIP databases API exposes items[]" || fail "GeoIP databases API missing items[]"
+DB_COUNT=$(echo "${GEOIP}" | python3 -c "import json; d=json.load(sys.stdin); items=d.get('items',d.get('databases',[])); print(len(items) if isinstance(items,list) else 0)" 2>/dev/null || echo "0")
 if [[ "${DB_COUNT}" -gt 0 ]]; then
   pass "GeoIP: ${DB_COUNT} database(s) returned — no empty-state contradiction"
 else
@@ -62,8 +82,8 @@ else
   pass "GeoIP page renders without empty-state text"
 fi
 
-# [4] Jobs i18n — zh-CN check
-echo "--- [4] Jobs i18n ---"
+# [5] Jobs i18n — zh-CN check
+echo "--- [5] Jobs i18n ---"
 JOBS_HTML=$(curl -sS --max-time 10 "${ADMIN_BASE}/admin/jobs" -H "${AUTH_HEADER}" -H "Accept-Language: zh-CN" 2>/dev/null || echo "")
 # Check for Chinese characters (indicates i18n working)
 if echo "${JOBS_HTML}" | python3 -c "import sys; h=sys.stdin.read(); print('zh:', '作业' in h or '任务' in h or '调度' in h or '运行' in h)" 2>/dev/null | grep -q "True"; then
@@ -78,8 +98,8 @@ for path in "/admin/jobs/runs" "/admin/jobs/schedules"; do
   [[ "${CODE}" == "200" ]] && pass "${path} returns 200" || fail "${path} returns ${CODE}"
 done
 
-# [5] GeoIP trigger update enqueues geoip_source_update job run
-echo "--- [5] GeoIP trigger update -> Job Center run ---"
+# [6] GeoIP trigger update enqueues geoip_source_update job run
+echo "--- [6] GeoIP trigger update -> Job Center run ---"
 TRIGGER_RESP=$(curl -sS --max-time 15 -X POST "${API_BASE}/admin/api/v1/geoip/update" \
   -H "Content-Type: application/json" \
   -H "${AUTH_HEADER}" \
@@ -112,7 +132,7 @@ case "${TRIGGER_HTTP}" in
     ;;
 esac
 
-# [6] Summary
+# [7] Summary
 echo ""
 echo "============================================"
 echo " Admin Jobs/GeoIP Smoke: ${PASS}P ${FAIL}F ${SKIP}S"
