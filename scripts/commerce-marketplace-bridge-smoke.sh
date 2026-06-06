@@ -209,6 +209,103 @@ L1_LEDGER=$(pg_exec -c "SELECT points_delta FROM growth_points_ledger WHERE user
 [[ "${L1_LEDGER}" == "100" ]] && pass "L1 growth_points_ledger=100" || fail "L1 ledger (got ${L1_LEDGER}, want 100)"
 
 echo ""
+echo "--- [9] Growth L2 ambassador reward ---"
+L2_EMAIL="bridge-smoke-l2@test.livemask"
+L2_PASS="BridgeSmokeL2!"
+pg_exec -c "DELETE FROM users WHERE email='${L2_EMAIL}'" >/dev/null || true
+L2_REG=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/auth/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"request_id\":\"bridge-l2\",\"email\":\"${L2_EMAIL}\",\"password\":\"${L2_PASS}\",\"display_name\":\"Bridge L2\",\"client_type\":\"app\"}") || true
+L2_TOKEN=$(echo "${L2_REG}" | quiet_json "access_token")
+L2_ID=$(echo "${L2_REG}" | quiet_json "user.user_id")
+L2_CODE=$(curl -sS --max-time 5 "${API_BASE}/api/v1/me/referral-link" \
+  -H "Authorization: Bearer ${L2_TOKEN}" | quiet_json "code")
+L1B_EMAIL="bridge-smoke-l1b@test.livemask"
+pg_exec -c "DELETE FROM users WHERE email='${L1B_EMAIL}'" >/dev/null || true
+L1B_REG=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/auth/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"request_id\":\"bridge-l1b\",\"email\":\"${L1B_EMAIL}\",\"password\":\"${L1_PASS}\",\"display_name\":\"Bridge L1B\",\"client_type\":\"app\",\"referral_code\":\"${L2_CODE}\"}") || true
+L1B_TOKEN=$(echo "${L1B_REG}" | quiet_json "access_token")
+L1B_ID=$(echo "${L1B_REG}" | quiet_json "user.user_id")
+L1B_CODE=$(curl -sS --max-time 5 "${API_BASE}/api/v1/me/referral-link" \
+  -H "Authorization: Bearer ${L1B_TOKEN}" | quiet_json "code")
+REF2_EMAIL="bridge-smoke-ref2@test.livemask"
+pg_exec -c "DELETE FROM users WHERE email='${REF2_EMAIL}'" >/dev/null || true
+REF2_REG=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/auth/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"request_id\":\"bridge-ref2\",\"email\":\"${REF2_EMAIL}\",\"password\":\"${REF_PASS}\",\"display_name\":\"Bridge Ref2\",\"client_type\":\"app\",\"referral_code\":\"${L1B_CODE}\"}") || true
+REF2_TOKEN=$(echo "${REF2_REG}" | quiet_json "access_token")
+REF2_ID=$(echo "${REF2_REG}" | quiet_json "user.user_id")
+[[ -n "${L2_ID}" && -n "${L1B_ID}" && -n "${REF2_ID}" ]] && pass "L2→L1→buyer chain" || fail "L2 chain setup"
+pg_exec -c "DELETE FROM points_ledger WHERE user_id='${REF2_ID}' AND source_id='bridge-l2-seed'" >/dev/null || true
+pg_exec -c "INSERT INTO points_ledger (id, user_id, direction, amount, balance_after, source_type, source_id, status, created_at) VALUES (gen_random_uuid(), '${REF2_ID}', 'credit', ${REF_SEED}, ${REF_SEED}, 'manual_adjustment', 'bridge-l2-seed', 'posted', now())" >/dev/null
+IDEM_L2="bridge-l2-$(date +%s)"
+L2_PKG=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
+  -H "Authorization: Bearer ${REF2_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"plan_id\":\"${PLAN_ID}\",\"idempotency_key\":\"${IDEM_L2}\",\"payment_method\":\"points\"}") || true
+L2_ORDER_ID=$(echo "${L2_PKG}" | quiet_json "order.id")
+curl -sS --max-time 10 -X POST "${API_BASE}/internal/job-executors/growth/ambassador-reward-aggregate" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d '{"limit":20}' >/dev/null || true
+L2_LEDGER=$(pg_exec -c "SELECT points_delta FROM growth_points_ledger WHERE user_id='${L2_ID}' AND source_event_id='package_paid:${L2_ORDER_ID}' AND attribution_level='l2' LIMIT 1")
+[[ "${L2_LEDGER}" == "50" ]] && pass "L2 growth_points_ledger=50" || fail "L2 ledger (got ${L2_LEDGER}, want 50)"
+
+echo ""
+echo "--- [10] Commerce package grant expire ---"
+EXPIRE_KEY="bridge-expire-$(date +%s)"
+CREATE_EXP=$(curl -sS --max-time 10 -X POST "${API_BASE}/admin/api/v1/packages" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"package_key\":\"${EXPIRE_KEY}\",\"display_name\":\"Bridge Expire Pack\",\"duration_days\":1,\"points_price\":800,\"points_grant\":200}") || true
+EXP_PKG_ID=$(echo "${CREATE_EXP}" | quiet_json "id")
+curl -sS --max-time 5 -X POST "${API_BASE}/admin/api/v1/packages/${EXP_PKG_ID}/publish" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null || true
+pg_exec -c "DELETE FROM points_ledger WHERE user_id='${BUYER_ID}' AND source_id='bridge-expire-seed'" >/dev/null || true
+pg_exec -c "INSERT INTO points_ledger (id, user_id, direction, amount, balance_after, source_type, source_id, status, created_at) VALUES (gen_random_uuid(), '${BUYER_ID}', 'credit', 5000, 5000, 'manual_adjustment', 'bridge-expire-seed', 'posted', now())" >/dev/null
+EXP_ORDER=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/package-orders" \
+  -H "Authorization: Bearer ${BUYER_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"package_id\":\"${EXP_PKG_ID}\",\"idempotency_key\":\"expire-$(date +%s)\",\"payment_method\":\"points\"}") || true
+EXP_ORDER_ID=$(echo "${EXP_ORDER}" | quiet_json "order.id")
+EXP_ORDER_STATUS=$(echo "${EXP_ORDER}" | quiet_json "order.status")
+[[ -n "${EXP_ORDER_ID}" && "${EXP_ORDER_STATUS}" == "fulfilled" ]] && pass "commerce package order fulfilled ${EXP_ORDER_ID}" || fail "commerce package order (status=${EXP_ORDER_STATUS})"
+pg_exec -c "UPDATE commerce_package_grants SET ends_at = NOW() - INTERVAL '2 days' WHERE order_id='${EXP_ORDER_ID}'" >/dev/null || true
+EXPIRE_JOB=$(curl -sS --max-time 10 -X POST "${API_BASE}/internal/job-executors/commerce/package-expire" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d '{}') || true
+EXPIRE_OK=$(echo "${EXPIRE_JOB}" | quiet_json "ok")
+GRANT_STATUS=$(pg_exec -c "SELECT status FROM commerce_package_grants WHERE order_id='${EXP_ORDER_ID}'")
+[[ "${EXPIRE_OK}" == "True" || "${EXPIRE_OK}" == "true" ]] && pass "package-expire executor ok" || fail "package-expire (${EXPIRE_JOB})"
+[[ "${GRANT_STATUS}" == "expired" ]] && pass "commerce grant expired" || fail "grant status (${GRANT_STATUS})"
+
+echo ""
+echo "--- [11] Ambassador settlement generate (dry-run) ---"
+PERIOD_END=$(date -u +%Y-%m-%d)
+PERIOD_START=$(date -u -v-7d +%Y-%m-%d 2>/dev/null || date -u -d '7 days ago' +%Y-%m-%d)
+SETTLE_GEN=$(curl -sS --max-time 10 -X POST "${API_BASE}/internal/job-executors/growth/ambassador-settlement-generate" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d "{\"period_start\":\"${PERIOD_START}\",\"period_end\":\"${PERIOD_END}\",\"dry_run\":true}") || true
+SETTLE_ROLE=$(echo "${SETTLE_GEN}" | quiet_json "role_type")
+[[ "${SETTLE_ROLE}" == "promotion_ambassador" ]] && pass "ambassador settlement dry-run" || fail "ambassador settlement (${SETTLE_GEN})"
+
+echo ""
+echo "--- [12] Support ticket SLA scan ---"
+pg_exec -c "DELETE FROM support_tickets WHERE title='bridge-sla-smoke'" >/dev/null || true
+pg_exec -c "INSERT INTO support_tickets (submitter_user_id, category, priority, status, title, last_activity_at) SELECT id, 'points', 'normal', 'open', 'bridge-sla-smoke', NOW() - INTERVAL '4 days' FROM users WHERE email='${BUYER_EMAIL}' LIMIT 1" >/dev/null
+SLA_JOB=$(curl -sS --max-time 10 -X POST "${API_BASE}/internal/job-executors/support/ticket-sla-scan" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d '{"stale_hours":1,"limit":10}') || true
+SLA_OK=$(echo "${SLA_JOB}" | quiet_json "ok")
+SLA_PRIO=$(pg_exec -c "SELECT priority FROM support_tickets WHERE title='bridge-sla-smoke' LIMIT 1")
+[[ "${SLA_OK}" == "True" || "${SLA_OK}" == "true" ]] && pass "ticket-sla-scan ok" || fail "ticket-sla-scan (${SLA_JOB})"
+[[ "${SLA_PRIO}" == "high" ]] && pass "ticket priority escalated to high" || fail "ticket priority (${SLA_PRIO})"
+
+echo ""
 echo "--- [7] Idempotent package replay (no double return) ---"
 PKG_ORDER2=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
   -H "Authorization: Bearer ${BUYER_TOKEN}" \
