@@ -935,7 +935,7 @@ HY2_RESP=$(curl -sS --max-time 5 -X POST "${API_BASE}/internal/agent/node-endpoi
   -H "X-Node-ID: ${NODE_ID}" \
   -H "X-Signature: ${HY2_SIG}" \
   -H "X-Timestamp: ${HY2_TS}" \
-  -d '{"public_endpoint_host":"hy2.node.livemask.io","public_endpoint_port":8443,"transport":"udp","sni":"hy2.livemask.io","alpn":"","protocol_profile":"hysteria2","profile_config":{"up_mbps":50,"down_mbps":200,"hop_ports":"10000-20000","obfs_type":"salamander","port":8443},"enabled":true}') || true
+  -d '{"public_endpoint_host":"hy2.node.livemask.io","public_endpoint_port":8443,"transport":"udp","sni":"hy2.livemask.io","alpn":"","protocol_profile":"hysteria2","profile_config":{"up_mbps":50,"down_mbps":200,"hop_ports":"10000-20000","obfs_type":"salamander","port":8443,"auth":"smoke-hy2-session-auth"},"enabled":true}') || true
 HY2_OK=$(echo "${HY2_RESP}" | quiet_json "ok")
 if [[ "${HY2_OK}" != "True" ]]; then
   fail "[TASK-CICD-PROTOCOL-SMOKE-001] Hysteria2 endpoint POST - (response: $(echo ${HY2_RESP} | head -c 200))"
@@ -1034,6 +1034,27 @@ if [[ "${HY2_LEAKED}" != "OK" ]]; then
   fail "[TASK-CICD-PROTOCOL-SMOKE-001] Hysteria2 security leak: ${HY2_LEAKED}"
 else
   pass "[TASK-CICD-PROTOCOL-SMOKE-001] Hysteria2: no unsafe fields in response"
+fi
+
+# --- [36a] Session credential endpoint (auth via credential, not connect_config) ---
+echo ""
+echo "--- [36a] GET session credential (owner-only hysteria2 auth) ---"
+if [[ -n "${HY2_SID:-}" && "${HY2_ERR_CODE}" != "DEVICE_LIMIT_EXCEEDED" ]]; then
+  HY2_CRED=$(curl -sS --max-time 10 -X GET "${API_BASE}/api/v1/connect/session/${HY2_SID}/credential" \
+    -H "Authorization: Bearer ${USER_TOKEN}") || true
+  HY2_CRED_AUTH=$(echo "${HY2_CRED}" | quiet_json "auth")
+  HY2_CRED_TYPE=$(echo "${HY2_CRED}" | quiet_json "credential_type")
+  if [[ "${HY2_CRED_AUTH}" == "smoke-hy2-session-auth" && "${HY2_CRED_TYPE}" == "hysteria2_auth" ]]; then
+    pass "session credential returns hysteria2 auth (not in connect_config)"
+  else
+    fail "session credential (${HY2_CRED})"
+  fi
+  HY2_CRED_LEAK_CONNECT=$(echo "${HY2_SESSION_RESP}" | python3 -c "import sys,json; print('auth' in json.dumps(json.load(sys.stdin)).lower())" 2>/dev/null || echo "False")
+  [[ "${HY2_CRED_LEAK_CONNECT}" == "False" ]] && pass "connect_config still omits auth" || fail "connect_config leaked auth"
+  HY2_CRED_NOAUTH=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" -X GET "${API_BASE}/api/v1/connect/session/${HY2_SID}/credential") || true
+  [[ "${HY2_CRED_NOAUTH}" == "401" || "${HY2_CRED_NOAUTH}" == "403" ]] && pass "credential requires auth (${HY2_CRED_NOAUTH})" || fail "credential auth leak (${HY2_CRED_NOAUTH})"
+else
+  skip "[36a] session credential (no hysteria2 session)"
 fi
 
 # Disconnect hysteria2 session
