@@ -20,13 +20,27 @@ terminal window uses the same entrypoints:
 | Postgres | `127.0.0.1:15432` |
 | Redis | `127.0.0.1:16379` |
 
+Recommended entry (hot reload **on by default**):
+
 ```bash
-docker compose -f infra/docker-compose.local.yml up -d
-docker compose --profile admin --profile website --profile nodeagent --profile job-service -f infra/docker-compose.local.yml up -d
-docker compose -f infra/docker-compose.local.yml ps
+bash scripts/local-dev.sh start
+bash scripts/local-dev.sh status
+bash scripts/local-dev.sh logs --services backend
 ```
 
-For source hot reload, add `infra/docker-compose.hot.yml` as an override:
+`local-dev.sh` / `runtime.sh` always merge `infra/docker-compose.hot.yml` in
+local mode unless you pass `--no-hot-reload` or set
+`LIVEMASK_LOCAL_HOT_RELOAD=false`.
+
+Hot reload behavior:
+
+- **Admin / Website**: native dev servers with polling watchers (`HMR`)
+- **Backend / Job Service / NodeAgent**: checksum watcher on mounted Go sources,
+  rebuild temp binary, restart only that process
+- Does **not** run `docker compose down`, delete volumes, pull branches, or
+  mutate task state
+
+Manual compose (equivalent to default hot reload):
 
 ```bash
 docker compose \
@@ -36,23 +50,15 @@ docker compose \
   --profile job-service \
   -f infra/docker-compose.local.yml \
   -f infra/docker-compose.hot.yml \
-  up
+  up -d
 ```
 
-Hot reload mode keeps Admin and Website on their native dev servers and adds
-polling file watchers for Docker Desktop. Backend, Job Service, and NodeAgent
-watch mounted Go source files, rebuild a temporary binary, and restart only that
-process when source changes. It does not run `docker compose down`, delete
-volumes, pull branches, or mutate task state.
-
-Run a narrower hot reload stack when only one service is needed:
+Disable hot reload explicitly:
 
 ```bash
-docker compose -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml up backend
-docker compose --profile admin -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml up admin
-docker compose --profile website -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml up website
-docker compose --profile nodeagent -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml up nodeagent
-docker compose --profile job-service -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml up job-service
+bash scripts/local-dev.sh start --no-hot-reload
+# or
+LIVEMASK_LOCAL_HOT_RELOAD=false bash scripts/local-dev.sh start
 ```
 
 `livemask-app` is not managed by Docker. Use the local Flutter SDK for app

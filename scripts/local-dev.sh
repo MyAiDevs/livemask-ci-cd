@@ -49,7 +49,8 @@ Options:
   --dry-run             For sync only: show what would happen without making changes.
   --changed-repo PATH   For sync only: path or name of repo that was just built.
                         Detects the affected Docker service(s) and syncs only those.
-  --auto-reload         Enable backend hot reload in local mode.
+  --no-hot-reload       Disable docker-compose.hot.yml overlay (hot reload is on by default).
+  --auto-reload         Alias to keep hot reload enabled (default).
   --pull                Pull images before start/restart.
   --env-file FILE       Load a local runtime env file.
   --no-deps             Do not start local PostgreSQL/Redis containers.
@@ -72,6 +73,10 @@ Fixed local ports:
   JobSvc    http://127.0.0.1:19191
   Postgres  127.0.0.1:15432
   Redis     127.0.0.1:16379
+
+Local hot reload (default ON):
+  runtime.sh always merges infra/docker-compose.hot.yml in local mode unless
+  --no-hot-reload is passed or LIVEMASK_LOCAL_HOT_RELOAD=false.
 
 Local Dev Runtime Permanent Rule:
   This script manages the long-lived livemask-local development runtime.

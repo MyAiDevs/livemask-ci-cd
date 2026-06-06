@@ -8,6 +8,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 LIVEMASK_WORKSPACE_ROOT="${LIVEMASK_WORKSPACE_ROOT:-$HOME/Developer/LiveMask}"
 
+LOCAL_COMPOSE_LIB="${SCRIPT_DIR}/lib/local-compose.sh"
+if [[ -f "${LOCAL_COMPOSE_LIB}" ]]; then
+  # shellcheck source=scripts/lib/local-compose.sh
+  source "${LOCAL_COMPOSE_LIB}"
+fi
+
 # Source workspace check if available
 BASE_SERVICE="${SCRIPT_DIR}/lib/base_service.sh"
 if [[ -f "${BASE_SERVICE}" ]]; then
@@ -68,8 +74,16 @@ echo "--- Runtime Containers ---"
 if command -v docker &>/dev/null && docker info &>/dev/null; then
   local_compose="${REPO_DIR}/infra/docker-compose.local.yml"
   if [[ -f "${local_compose}" ]]; then
-    echo "  Compose file: ${local_compose}"
-    docker compose -f "${local_compose}" ps --services --filter "status=running" 2>/dev/null || echo "  (compose status unavailable)"
+    local compose_file_args=(-f "${local_compose}")
+    local hot_file
+    hot_file="$(local_compose_hot_file "${REPO_DIR}")"
+    if local_compose_hot_reload_enabled && [[ -f "${hot_file}" ]]; then
+      compose_file_args+=(-f "${hot_file}")
+      echo "  Compose files: ${local_compose} + docker-compose.hot.yml (default hot reload)"
+    else
+      echo "  Compose file: ${local_compose}"
+    fi
+    docker compose "${compose_file_args[@]}" ps --services --filter "status=running" 2>/dev/null || echo "  (compose status unavailable)"
   else
     echo "  Compose file not found: ${local_compose}"
   fi
