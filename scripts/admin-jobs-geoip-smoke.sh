@@ -78,7 +78,41 @@ for path in "/admin/jobs/runs" "/admin/jobs/schedules"; do
   [[ "${CODE}" == "200" ]] && pass "${path} returns 200" || fail "${path} returns ${CODE}"
 done
 
-# [5] Summary
+# [5] GeoIP trigger update enqueues geoip_source_update job run
+echo "--- [5] GeoIP trigger update -> Job Center run ---"
+TRIGGER_RESP=$(curl -sS --max-time 15 -X POST "${API_BASE}/admin/api/v1/geoip/update" \
+  -H "Content-Type: application/json" \
+  -H "${AUTH_HEADER}" \
+  -d '{"source":"hackl0us_geoip2_cn","edition":"country","force":false}' 2>/dev/null || echo "{}")
+TRIGGER_HTTP=$(curl -sS --max-time 15 -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/admin/api/v1/geoip/update" \
+  -H "Content-Type: application/json" \
+  -H "${AUTH_HEADER}" \
+  -d '{"source":"hackl0us_geoip2_cn","edition":"country","force":false}' 2>/dev/null || echo "000")
+RUN_ID=$(echo "${TRIGGER_RESP}" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('run_id',''))" 2>/dev/null || echo "")
+
+case "${TRIGGER_HTTP}" in
+  202)
+    if [[ -n "${RUN_ID}" ]]; then
+      pass "GeoIP update accepted with run_id=${RUN_ID}"
+      JOBS_LIST=$(curl -sS --max-time 10 "${API_BASE}/admin/api/v1/jobs/runs?job_type=geoip_source_update&limit=20" -H "${AUTH_HEADER}" 2>/dev/null || echo "{}")
+      if echo "${JOBS_LIST}" | python3 -c "import json,sys; d=json.load(sys.stdin); rid=sys.argv[1]; runs=d.get('runs',[]); print('yes' if any(r.get('run_id')==rid for r in runs) else 'no')" "${RUN_ID}" 2>/dev/null | grep -q yes; then
+        pass "Job Center lists geoip_source_update run ${RUN_ID}"
+      else
+        fail "Job Center missing geoip_source_update run ${RUN_ID}"
+      fi
+    else
+      fail "GeoIP update HTTP 202 but run_id missing"
+    fi
+    ;;
+  503)
+    fail "GeoIP update HTTP 503 (job service client not configured on Backend)"
+    ;;
+  *)
+    fail "GeoIP update HTTP ${TRIGGER_HTTP}"
+    ;;
+esac
+
+# [6] Summary
 echo ""
 echo "============================================"
 echo " Admin Jobs/GeoIP Smoke: ${PASS}P ${FAIL}F ${SKIP}S"
