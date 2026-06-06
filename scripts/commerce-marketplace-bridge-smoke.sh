@@ -396,6 +396,25 @@ BILL_SUM_POINTS=$(echo "${BILL_SUM}" | python3 -c "import sys,json; d=json.load(
 [[ "${BILL_SUM_POINTS}" == "True" ]] && pass "billing summary includes POINTS currency" || fail "billing summary currency (${BILL_SUM})"
 
 echo ""
+echo "--- [19] Billing system report generate + admin list ---"
+BILL_REP_GEN=$(curl -sS --max-time 15 -X POST "${API_BASE}/internal/job-executors/billing/system-report-generate" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d '{}') || true
+BILL_REP_OK=$(echo "${BILL_REP_GEN}" | quiet_json "ok")
+[[ "${BILL_REP_OK}" == "True" || "${BILL_REP_OK}" == "true" ]] && pass "billing system report generate ok" || fail "billing system report generate (${BILL_REP_GEN})"
+BILL_REPORTS=$(curl -sS --max-time 10 -X GET "${API_BASE}/admin/api/v1/billing/reports?report_type=system_total&limit=5" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+REPORT_TOTAL=$(echo "${BILL_REPORTS}" | quiet_json "total")
+[[ "${REPORT_TOTAL}" -ge 1 ]] 2>/dev/null && pass "admin billing reports total>=1 (${REPORT_TOTAL})" || fail "admin billing reports (${BILL_REPORTS})"
+REPORT_ID=$(echo "${BILL_REPORTS}" | python3 -c "import sys,json; d=json.load(sys.stdin); rs=d.get('reports') or []; print(rs[0]['id'] if rs else '')" 2>/dev/null || echo "")
+[[ -n "${REPORT_ID}" ]] && pass "billing report id ${REPORT_ID}" || fail "billing report id missing (${BILL_REPORTS})"
+BILL_REP_DETAIL=$(curl -sS --max-time 10 -X GET "${API_BASE}/admin/api/v1/billing/reports/${REPORT_ID}" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+REP_TYPE=$(echo "${BILL_REP_DETAIL}" | quiet_json "report_type")
+[[ "${REP_TYPE}" == "system_total" ]] && pass "billing report detail system_total" || fail "billing report detail (${BILL_REP_DETAIL})"
+
+echo ""
 echo "--- [7] Idempotent package replay (no double return) ---"
 PKG_ORDER2=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
   -H "Authorization: Bearer ${BUYER_TOKEN}" \
