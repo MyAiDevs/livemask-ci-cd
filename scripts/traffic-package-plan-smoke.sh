@@ -179,6 +179,42 @@ EXPIRE_STATUS=$(pg_exec -c "SELECT status FROM user_traffic_entitlements WHERE u
 [[ "${EXPIRE_STATUS}" == "expired" ]] && pass "entitlement expired in DB" || fail "expire status (${EXPIRE_STATUS})"
 
 echo ""
+echo "--- [8] USDT pending order ---"
+USDT_BUYER="traffic-smoke-usdt@test.livemask"
+USDT_PASS="TrafficSmoke123!"
+pg_exec -c "DELETE FROM users WHERE email='${USDT_BUYER}'" >/dev/null || true
+USDT_REG=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/auth/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"request_id\":\"tp-usdt\",\"email\":\"${USDT_BUYER}\",\"password\":\"${USDT_PASS}\",\"display_name\":\"USDT Buyer\",\"client_type\":\"app\"}") || true
+USDT_TOKEN=$(echo "${USDT_REG}" | quiet_json "access_token")
+USDT_ID=$(echo "${USDT_REG}" | quiet_json "user.user_id")
+pg_exec -c "UPDATE traffic_package_plans SET usdt_price_amount = 9.99, payment_methods = '[\"points\",\"usdt\"]'::jsonb WHERE id = '${PLAN_ID}'" >/dev/null || true
+USDT_IDEM="usdt-smoke-$(date +%s)"
+USDT_ORDER=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
+  -H "Authorization: Bearer ${USDT_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"plan_id\":\"${PLAN_ID}\",\"idempotency_key\":\"${USDT_IDEM}\",\"payment_method\":\"usdt\"}") || true
+USDT_ORDER_ID=$(echo "${USDT_ORDER}" | quiet_json "order.id")
+USDT_ORDER_STATUS=$(echo "${USDT_ORDER}" | quiet_json "order.status")
+USDT_ORDER_AMOUNT=$(echo "${USDT_ORDER}" | quiet_json "order.usdt_amount")
+[[ -n "${USDT_ORDER_ID}" && "${USDT_ORDER_STATUS}" == "pending_payment" ]] && pass "usdt order pending ${USDT_ORDER_ID}" || fail "usdt pending order (status=${USDT_ORDER_STATUS})"
+[[ -n "${USDT_ORDER_AMOUNT}" && "${USDT_ORDER_AMOUNT}" != "0" ]] && pass "usdt amount snapshot (${USDT_ORDER_AMOUNT})" || fail "usdt amount (${USDT_ORDER_AMOUNT})"
+
+echo ""
+echo "--- [9] USDT order reconcile job ---"
+RECONCILE_JOB=$(curl -sS --max-time 10 -X POST "${API_BASE}/internal/job-executors/traffic-package/order-reconcile" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d '{}') || true
+RECONCILE_OK=$(echo "${RECONCILE_JOB}" | quiet_json "ok")
+RECONCILE_COUNT=$(echo "${RECONCILE_JOB}" | quiet_json "processed_count")
+USDT_FULFILLED=$(pg_exec -c "SELECT status FROM traffic_package_orders WHERE id='${USDT_ORDER_ID}'")
+USDT_ENT_STATUS=$(pg_exec -c "SELECT status FROM user_traffic_entitlements WHERE user_id='${USDT_ID}' ORDER BY created_at DESC LIMIT 1")
+[[ "${RECONCILE_OK}" == "True" || "${RECONCILE_OK}" == "true" ]] && pass "order-reconcile job ok (count=${RECONCILE_COUNT})" || fail "order-reconcile (${RECONCILE_JOB})"
+[[ "${USDT_FULFILLED}" == "fulfilled" ]] && pass "usdt order fulfilled" || fail "usdt order status (${USDT_FULFILLED})"
+[[ "${USDT_ENT_STATUS}" == "active" ]] && pass "usdt entitlement active" || fail "usdt entitlement (${USDT_ENT_STATUS})"
+
+echo ""
 echo "========================================"
 printf '%s\n' "${SUMMARY_LINES[@]}"
 if [[ "${FAILED}" -ne 0 ]]; then
