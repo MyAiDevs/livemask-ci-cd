@@ -471,6 +471,23 @@ else
 fi
 
 echo ""
+echo "=== Smoke: Admin Jobs + GeoIP Multi-Source E2E (TASK-CICD-ADMIN-JOBS-GEOIP-REGRESSION-SMOKE-001) ==="
+if bash "${SCRIPT_DIR}/admin-jobs-geoip-smoke.sh" 2>&1; then
+  echo "Admin Jobs/GeoIP multi-source smoke PASSED."
+else
+  admin_geoip_rc=$?
+  echo ""
+  echo "=== Admin Jobs/GeoIP Multi-Source Smoke FAILED ==="
+  echo "--- docker compose ps ---"
+  docker compose -f "${COMPOSE_FILE}" ps 2>/dev/null || true
+  echo "--- docker compose logs backend (last 100) ---"
+  docker compose -f "${COMPOSE_FILE}" logs backend --tail=100 2>/dev/null || true
+  echo "--- docker compose logs admin (last 100) ---"
+  docker compose -f "${COMPOSE_FILE}" logs admin --tail=100 2>/dev/null || true
+  exit ${admin_geoip_rc}
+fi
+
+echo ""
 # ── NodeAgent Release Smoke (TASK-CICD-NODEAGENT-RELEASE-001) ──────────────
 echo ""
 echo "=== Smoke: NodeAgent Release/Check/Rollout (TASK-CICD-NODEAGENT-RELEASE-001) ==="
@@ -1093,4 +1110,4 @@ else
 fi
 
 echo ""
-echo "Smoke PASS: full stack (health + config center + auth/rbac + node agent + billing/devices + connect session + content system + geoip + job-service + dashboard + protocol-endpoint-rollout + protocol-capability + geoip-credentials + nodeagent-release + website-blog + system-settings + scheduler + app-release + sentry-config + observability + i18n-language + bandwidth-auto-reconnect + traffic-analytics-v2 + admin-nav-ia + jobs-hardening + growth-revenue + reward-notification + release-control + connection-quality + nodeagent-config-sync + nat-sharing-guard + nodeagent-speedtest-bandwidth + nodeagent-credential-rotation + real-data-closed-loop + jobs-real-data + node-status-freshness + app-runtime-governance + protocol-parity + log-retention + admin-nodes-ux + website-i18n-announcement + secret-leak-standard + worker-harness + three-level-reward)"
+echo "Smoke PASS: full stack (health + config center + auth/rbac + node agent + billing/devices + connect session + content system + geoip + job-service + dashboard + protocol-endpoint-rollout + protocol-capability + geoip-credentials + admin-jobs-geoip + nodeagent-release + website-blog + system-settings + scheduler + app-release + sentry-config + observability + i18n-language + bandwidth-auto-reconnect + traffic-analytics-v2 + admin-nav-ia + jobs-hardening + growth-revenue + reward-notification + release-control + connection-quality + nodeagent-config-sync + nat-sharing-guard + nodeagent-speedtest-bandwidth + nodeagent-credential-rotation + real-data-closed-loop + jobs-real-data + node-status-freshness + app-runtime-governance + protocol-parity + log-retention + admin-nodes-ux + website-i18n-announcement + secret-leak-standard + worker-harness + three-level-reward)"

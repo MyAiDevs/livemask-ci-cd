@@ -95,30 +95,30 @@ security_check() {
   leaked=$(echo "${json}" | python3 -c "
 import sys,json
 data = json.load(sys.stdin)
-body_str = json.dumps(data).lower()
 
-# Sensitive key patterns that MUST NOT appear in API responses
-patterns = [
-    'encrypted_secret',
-    'plaintext_secret', 'plaintext', 
-    'license_key',
-    'api_key',
-    'geoiP_credential_encryption_key',  # case-insensitive
-    'encryption_key',
-]
+# Flag forbidden JSON keys only — not credential_type enum values like api_key/token.
+FORBIDDEN_KEYS = {
+    'encrypted_secret', 'plaintext_secret', 'plaintext',
+    'license_key', 'api_key', 'secret', 'secret_token',
+    'geoip_credential_encryption_key', 'encryption_key', 'token',
+}
 
 found = []
-for p in patterns:
-    if p in body_str:
-        found.append(p)
 
-# Check for 'token' but NOT 'access_token' or 'refresh_token' which are valid auth fields
-# Only flag bare 'token' keys or 'secret_token'
-if '\"token\"' in body_str or '\"secret_token\"' in body_str:
-    found.append('bare_token_key')
+def walk(obj):
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key.lower() in FORBIDDEN_KEYS:
+                found.append(key)
+            walk(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            walk(item)
+
+walk(data)
 
 if found:
-    print('LEAK: ' + ', '.join(set(found)))
+    print('LEAK: ' + ', '.join(sorted(set(found))))
 else:
     print('OK')
 " 2>/dev/null || echo "OK")
