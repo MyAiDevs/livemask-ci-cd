@@ -33,6 +33,9 @@ run_smoke "Gate B — Traffic package" "traffic-package-plan-smoke.sh"
 run_smoke "Gate C — Package→C2C bridge" "commerce-marketplace-bridge-smoke.sh"
 
 echo ""
+echo "Gate D — NodeAgent usage report is covered inside traffic-package-plan-smoke.sh [11]"
+
+echo ""
 echo "========================================"
 printf '%s\n' "${SUMMARY_LINES[@]}"
 if [[ "${FAILED}" -ne 0 ]]; then
