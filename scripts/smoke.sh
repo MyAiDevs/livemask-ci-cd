@@ -471,6 +471,16 @@ else
 fi
 
 echo ""
+echo "=== Smoke: Admin User Detail payout + IM fields ==="
+if bash "${SCRIPT_DIR}/admin-user-detail-smoke.sh" 2>&1; then
+  echo "Admin user detail smoke PASSED."
+else
+  admin_user_detail_rc=$?
+  echo "Admin user detail smoke FAILED (exit ${admin_user_detail_rc})"
+  FAILED=1
+fi
+
+echo ""
 echo "=== Smoke: Admin Jobs + GeoIP Multi-Source E2E (TASK-CICD-ADMIN-JOBS-GEOIP-REGRESSION-SMOKE-001) ==="
 if bash "${SCRIPT_DIR}/admin-jobs-geoip-smoke.sh" 2>&1; then
   echo "Admin Jobs/GeoIP multi-source smoke PASSED."
