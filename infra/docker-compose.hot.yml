@@ -1,0 +1,181 @@
+services:
+  backend:
+    environment:
+      HOT_RELOAD_INTERVAL_SEC: "${HOT_RELOAD_INTERVAL_SEC:-1}"
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        mkdir -p /tmp/livemask-hot
+        child=""
+
+        checksum() {
+          find . -type f \
+            \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' -o -path './configs/*' \) \
+            -not -path './.git/*' \
+            -not -path './test-results/*' \
+            -print | sort | xargs sha256sum 2>/dev/null | sha256sum | awk '{print $$1}'
+        }
+
+        stop_child() {
+          if [ -n "$$child" ] && kill -0 "$$child" 2>/dev/null; then
+            kill "$$child"
+            wait "$$child" 2>/dev/null || true
+          fi
+          child=""
+        }
+
+        start_child() {
+          echo "[hot] building backend"
+          if /usr/local/go/bin/go build -o /tmp/livemask-hot/backend .; then
+            echo "[hot] starting backend"
+            /tmp/livemask-hot/backend &
+            child=$$!
+          else
+            echo "[hot] backend build failed; waiting for changes"
+          fi
+        }
+
+        trap 'stop_child; exit 0' INT TERM EXIT
+        last="$$(checksum || true)"
+        start_child
+
+        while sleep "${HOT_RELOAD_INTERVAL_SEC:-1}"; do
+          current="$$(checksum || true)"
+          if [ "$$current" != "$$last" ]; then
+            echo "[hot] backend source changed; rebuilding"
+            last="$$current"
+            stop_child
+            start_child
+          elif [ -n "$$child" ] && ! kill -0 "$$child" 2>/dev/null; then
+            wait "$$child" 2>/dev/null || true
+            child=""
+            echo "[hot] backend exited; rebuilding"
+            start_child
+          fi
+        done
+
+  job-service:
+    environment:
+      HOT_RELOAD_INTERVAL_SEC: "${HOT_RELOAD_INTERVAL_SEC:-1}"
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        mkdir -p /tmp/livemask-hot
+        child=""
+
+        checksum() {
+          find . -type f \
+            \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' -o -path './configs/*' \) \
+            -not -path './.git/*' \
+            -not -path './test-results/*' \
+            -print | sort | xargs sha256sum 2>/dev/null | sha256sum | awk '{print $$1}'
+        }
+
+        stop_child() {
+          if [ -n "$$child" ] && kill -0 "$$child" 2>/dev/null; then
+            kill "$$child"
+            wait "$$child" 2>/dev/null || true
+          fi
+          child=""
+        }
+
+        start_child() {
+          echo "[hot] building job-service"
+          if /usr/local/go/bin/go build -tags sqlstore -o /tmp/livemask-hot/job-service ./cmd/job-service; then
+            echo "[hot] starting job-service"
+            /tmp/livemask-hot/job-service &
+            child=$$!
+          else
+            echo "[hot] job-service build failed; waiting for changes"
+          fi
+        }
+
+        trap 'stop_child; exit 0' INT TERM EXIT
+        last="$$(checksum || true)"
+        start_child
+
+        while sleep "${HOT_RELOAD_INTERVAL_SEC:-1}"; do
+          current="$$(checksum || true)"
+          if [ "$$current" != "$$last" ]; then
+            echo "[hot] job-service source changed; rebuilding"
+            last="$$current"
+            stop_child
+            start_child
+          elif [ -n "$$child" ] && ! kill -0 "$$child" 2>/dev/null; then
+            wait "$$child" 2>/dev/null || true
+            child=""
+            echo "[hot] job-service exited; rebuilding"
+            start_child
+          fi
+        done
+
+  nodeagent:
+    environment:
+      HOT_RELOAD_INTERVAL_SEC: "${HOT_RELOAD_INTERVAL_SEC:-1}"
+    command:
+      - sh
+      - -lc
+      - |
+        set -eu
+        sh /workspace/livemask-nodeagent/scripts/install-singbox.sh /usr/local/bin
+        mkdir -p /tmp/livemask-hot
+        child=""
+
+        checksum() {
+          find . -type f \
+            \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' -o -path './configs/*' \) \
+            -not -path './.git/*' \
+            -not -path './test-results/*' \
+            -print | sort | xargs sha256sum 2>/dev/null | sha256sum | awk '{print $$1}'
+        }
+
+        stop_child() {
+          if [ -n "$$child" ] && kill -0 "$$child" 2>/dev/null; then
+            kill "$$child"
+            wait "$$child" 2>/dev/null || true
+          fi
+          child=""
+        }
+
+        start_child() {
+          echo "[hot] building nodeagent"
+          if /usr/local/go/bin/go build -o /tmp/livemask-hot/nodeagent ./cmd/nodeagent; then
+            echo "[hot] starting nodeagent"
+            /tmp/livemask-hot/nodeagent &
+            child=$$!
+          else
+            echo "[hot] nodeagent build failed; waiting for changes"
+          fi
+        }
+
+        trap 'stop_child; exit 0' INT TERM EXIT
+        last="$$(checksum || true)"
+        start_child
+
+        while sleep "${HOT_RELOAD_INTERVAL_SEC:-1}"; do
+          current="$$(checksum || true)"
+          if [ "$$current" != "$$last" ]; then
+            echo "[hot] nodeagent source changed; rebuilding"
+            last="$$current"
+            stop_child
+            start_child
+          elif [ -n "$$child" ] && ! kill -0 "$$child" 2>/dev/null; then
+            wait "$$child" 2>/dev/null || true
+            child=""
+            echo "[hot] nodeagent exited; rebuilding"
+            start_child
+          fi
+        done
+
+  admin:
+    environment:
+      WATCHPACK_POLLING: "${WATCHPACK_POLLING:-true}"
+      CHOKIDAR_USEPOLLING: "${CHOKIDAR_USEPOLLING:-true}"
+
+  website:
+    environment:
+      CHOKIDAR_USEPOLLING: "${CHOKIDAR_USEPOLLING:-true}"

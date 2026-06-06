@@ -3,12 +3,12 @@ LiveMask CI/CD pipelines, GitHub Actions workflows, deployment automation, infra
 
 ## Local Dev Runtime
 
-Use `scripts/local-dev.sh` for the long-lived local development runtime. It
-wraps `scripts/runtime.sh` with the local compose stack (`livemask-local`) and
-defaults to all local services.
+Use `infra/docker-compose.local.yml` for the long-lived local development
+runtime. It runs the shared `livemask-local` compose project and mounts sibling
+repo source trees into the containers.
 
-The local dev ports are fixed by `scripts/local-dev.sh` so every Cursor/Codex
-window uses the same entrypoints:
+The local dev ports are fixed by the compose file so every AI editor and
+terminal window uses the same entrypoints:
 
 | Service | URL / port |
 | --- | --- |
@@ -21,38 +21,42 @@ window uses the same entrypoints:
 | Redis | `127.0.0.1:16379` |
 
 ```bash
-bash scripts/local-dev.sh start
-bash scripts/local-dev.sh status
+docker compose -f infra/docker-compose.local.yml up -d
+docker compose --profile admin --profile website --profile nodeagent --profile job-service -f infra/docker-compose.local.yml up -d
+docker compose -f infra/docker-compose.local.yml ps
 ```
 
-After a repo task is completed and pushed, refresh the running local service
-without stopping the whole local stack:
+For source hot reload, add `infra/docker-compose.hot.yml` as an override:
 
 ```bash
-bash scripts/local-dev.sh sync --services backend
-bash scripts/local-dev.sh sync --services backend,nodeagent
-bash scripts/local-dev.sh sync --services admin,website
-bash scripts/local-dev.sh sync --services all
+docker compose \
+  --profile admin \
+  --profile website \
+  --profile nodeagent \
+  --profile job-service \
+  -f infra/docker-compose.local.yml \
+  -f infra/docker-compose.hot.yml \
+  up
 ```
 
-`sync` pulls clean sibling repos with `git pull --ff-only origin dev` and then
-recreates only the selected Docker services with `docker compose up -d`. It does
-not run `docker compose down`. If a repo has local/Cursor changes, the pull is
-skipped so those changes are not overwritten.
+Hot reload mode keeps Admin and Website on their native dev servers and adds
+polling file watchers for Docker Desktop. Backend, Job Service, and NodeAgent
+watch mounted Go source files, rebuild a temporary binary, and restart only that
+process when source changes. It does not run `docker compose down`, delete
+volumes, pull branches, or mutate task state.
 
-Use this after any repo task that changes a locally running service:
+Run a narrower hot reload stack when only one service is needed:
 
-| Repo | Local service refresh |
-| --- | --- |
-| `livemask-backend` | `bash scripts/local-dev.sh sync --services backend` |
-| `livemask-nodeagent` | `bash scripts/local-dev.sh sync --services nodeagent` |
-| `livemask-job-service` | `bash scripts/local-dev.sh sync --services job-service` |
-| `livemask-admin` | `bash scripts/local-dev.sh sync --services admin` |
-| `livemask-website` | `bash scripts/local-dev.sh sync --services website` |
-| multiple services | `bash scripts/local-dev.sh sync --services backend,admin,website,nodeagent,job-service` |
+```bash
+docker compose -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml up backend
+docker compose --profile admin -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml up admin
+docker compose --profile website -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml up website
+docker compose --profile nodeagent -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml up nodeagent
+docker compose --profile job-service -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml up job-service
+```
 
-`livemask-app` is not managed by Docker. Use `livemask-app/scripts/local-app.sh`
-for Flutter build/run refresh.
+`livemask-app` is not managed by Docker. Use the local Flutter SDK for app
+build/run refresh.
 
 ## Dev Merge Guard
 
