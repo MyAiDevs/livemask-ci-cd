@@ -348,6 +348,15 @@ TRANS_STATUS=$(echo "${TRANS_TICKET}" | quiet_json "status")
 [[ "${TRANS_STATUS}" == "triage" ]] && pass "support ticket transitioned to triage" || fail "support transition (${TRANS_TICKET})"
 
 echo ""
+echo "--- [15] Admin user bank-card list (masked) ---"
+ADMIN_CARDS=$(curl -sS --max-time 10 -X GET "${API_BASE}/admin/api/v1/users/${BUYER_ID}/bank-cards" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+ADMIN_CARD_STATUS=$(echo "${ADMIN_CARDS}" | python3 -c "import sys,json; d=json.load(sys.stdin); cards=d.get('cards') or []; print(next((c.get('status','') for c in cards if c.get('id')=='${CARD_ID}'), ''))" 2>/dev/null || echo "")
+ADMIN_MASKED=$(echo "${ADMIN_CARDS}" | python3 -c "import sys,json; d=json.load(sys.stdin); cards=d.get('cards') or []; print(next((c.get('card_number_masked','') for c in cards if c.get('id')=='${CARD_ID}'), ''))" 2>/dev/null || echo "")
+[[ "${ADMIN_CARD_STATUS}" == "verified" ]] && pass "admin user bank-card list verified" || fail "admin bank-card list (${ADMIN_CARDS})"
+[[ "${ADMIN_MASKED}" == *"****"* && "${ADMIN_MASKED}" != *"6222021234567890"* ]] && pass "admin list masked only" || fail "admin list mask leak (${ADMIN_MASKED})"
+
+echo ""
 echo "--- [7] Idempotent package replay (no double return) ---"
 PKG_ORDER2=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
   -H "Authorization: Bearer ${BUYER_TOKEN}" \
