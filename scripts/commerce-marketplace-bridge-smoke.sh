@@ -371,6 +371,22 @@ USER_FORBIDDEN=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" -X GET "${
 [[ "${USER_FORBIDDEN}" == "403" || "${USER_FORBIDDEN}" == "401" ]] && pass "user token blocked on admin ledger (${USER_FORBIDDEN})" || fail "admin ledger RBAC (${USER_FORBIDDEN})"
 
 echo ""
+echo "--- [17] Billing ledger project + admin search ---"
+BILL_PROJ=$(curl -sS --max-time 15 -X POST "${API_BASE}/internal/job-executors/billing/ledger-project" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d '{"limit":500}') || true
+BILL_PROJ_OK=$(echo "${BILL_PROJ}" | quiet_json "ok")
+BILL_PROJ_COUNT=$(echo "${BILL_PROJ}" | quiet_json "processed_count")
+[[ "${BILL_PROJ_OK}" == "True" || "${BILL_PROJ_OK}" == "true" ]] && pass "billing ledger project ok (count=${BILL_PROJ_COUNT})" || fail "billing ledger project (${BILL_PROJ})"
+BILL_LEDGER=$(curl -sS --max-time 10 -X GET "${API_BASE}/admin/api/v1/billing/ledger?limit=10&user_id=${BUYER_ID}" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+BILL_TOTAL=$(echo "${BILL_LEDGER}" | quiet_json "total")
+[[ "${BILL_TOTAL}" -ge 1 ]] 2>/dev/null && pass "admin billing ledger user rows (${BILL_TOTAL})" || fail "admin billing ledger (${BILL_LEDGER})"
+BILL_POINTS=$(echo "${BILL_LEDGER}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(any((e.get('ledger_family')=='points') for e in (d.get('entries') or [])))" 2>/dev/null || echo "False")
+[[ "${BILL_POINTS}" == "True" ]] && pass "billing ledger includes points family" || fail "billing ledger family (${BILL_LEDGER})"
+
+echo ""
 echo "--- [7] Idempotent package replay (no double return) ---"
 PKG_ORDER2=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
   -H "Authorization: Bearer ${BUYER_TOKEN}" \
