@@ -357,6 +357,20 @@ ADMIN_MASKED=$(echo "${ADMIN_CARDS}" | python3 -c "import sys,json; d=json.load(
 [[ "${ADMIN_MASKED}" == *"****"* && "${ADMIN_MASKED}" != *"6222021234567890"* ]] && pass "admin list masked only" || fail "admin list mask leak (${ADMIN_MASKED})"
 
 echo ""
+echo "--- [16] Admin points ledger search ---"
+LEDGER_ALL=$(curl -sS --max-time 10 -X GET "${API_BASE}/admin/api/v1/points/ledger?limit=5" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+LEDGER_TOTAL=$(echo "${LEDGER_ALL}" | quiet_json "total")
+[[ "${LEDGER_TOTAL}" -ge 1 ]] 2>/dev/null && pass "admin points ledger total>=1 (${LEDGER_TOTAL})" || fail "admin points ledger (${LEDGER_ALL})"
+LEDGER_USER=$(curl -sS --max-time 10 -X GET "${API_BASE}/admin/api/v1/points/ledger?limit=10&user_id=${BUYER_ID}" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+USER_ITEMS=$(echo "${LEDGER_USER}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('items') or []))" 2>/dev/null || echo "0")
+[[ "${USER_ITEMS}" -ge 1 ]] 2>/dev/null && pass "admin ledger user filter (${USER_ITEMS} rows)" || fail "admin ledger user filter (${LEDGER_USER})"
+USER_FORBIDDEN=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" -X GET "${API_BASE}/admin/api/v1/points/ledger" \
+  -H "Authorization: Bearer ${BUYER_TOKEN}") || true
+[[ "${USER_FORBIDDEN}" == "403" || "${USER_FORBIDDEN}" == "401" ]] && pass "user token blocked on admin ledger (${USER_FORBIDDEN})" || fail "admin ledger RBAC (${USER_FORBIDDEN})"
+
+echo ""
 echo "--- [7] Idempotent package replay (no double return) ---"
 PKG_ORDER2=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
   -H "Authorization: Bearer ${BUYER_TOKEN}" \
