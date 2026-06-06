@@ -7,6 +7,7 @@ BACKEND_ROOT="${BACKEND_ROOT:-${SCRIPT_DIR}/../../livemask-backend}"
 COMPOSE_FILE="${COMPOSE_FILE:-${SCRIPT_DIR}/../infra/docker-compose.local.yml}"
 BACKEND_HTTP_PORT="${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
 API_BASE="http://127.0.0.1:${BACKEND_HTTP_PORT}"
+INTERNAL_SECRET="${INTERNAL_JOB_SECRET:-${INTERNAL_SERVICE_SECRET:-local-dev-secret}}"
 
 FAILED=0
 SUMMARY_LINES=()
@@ -130,6 +131,52 @@ DEBIT_COUNT=$(pg_exec -c "SELECT COUNT(*) FROM points_ledger WHERE user_id='${BU
 ENT_RESP=$(curl -sS --max-time 5 "${API_BASE}/api/v1/me/traffic-entitlement" -H "Authorization: Bearer ${BUYER_TOKEN}") || true
 ME_STATUS=$(echo "${ENT_RESP}" | quiet_json "entitlement.status")
 [[ "${ME_STATUS}" == "active" ]] && pass "GET /me/traffic-entitlement active" || fail "me entitlement (${ME_STATUS})"
+
+echo ""
+echo "--- [6] Usage ingest + exhausted gate ---"
+QUOTA_BYTES=$(echo "${ENT_RESP}" | quiet_json "entitlement.traffic_quota_bytes")
+USED_INGEST=$((QUOTA_BYTES + 1024))
+INGEST=$(curl -sS --max-time 10 -X POST "${API_BASE}/internal/job-executors/traffic-package/usage-ingest" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d "{\"user_id\":\"${BUYER_ID}\",\"bytes_used\":${USED_INGEST}}") || true
+INGEST_OK=$(echo "${INGEST}" | quiet_json "ok")
+ENT_EXHAUSTED=$(pg_exec -c "SELECT status FROM user_traffic_entitlements WHERE user_id='${BUYER_ID}' ORDER BY created_at DESC LIMIT 1")
+[[ "${INGEST_OK}" == "True" || "${INGEST_OK}" == "true" ]] && pass "usage ingest ok" || fail "usage ingest (${INGEST})"
+[[ "${ENT_EXHAUSTED}" == "exhausted" ]] && pass "entitlement exhausted after usage" || fail "entitlement status (${ENT_EXHAUSTED})"
+
+CONNECT=$(curl -sS --max-time 5 -w "\n%{http_code}" -X POST "${API_BASE}/api/v1/connect/session" \
+  -H "Authorization: Bearer ${BUYER_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"platform":"smoke","app_version":"1.0"}') || true
+CONNECT_HTTP=$(echo "${CONNECT}" | tail -1)
+[[ "${CONNECT_HTTP}" == "403" || "${CONNECT_HTTP}" == "400" ]] && pass "connect blocked when exhausted (${CONNECT_HTTP})" || fail "connect gate (${CONNECT_HTTP})"
+
+echo ""
+echo "--- [7] Entitlement expire job ---"
+EXPIRE_BUYER="traffic-smoke-expire@test.livemask"
+EXPIRE_PASS="TrafficSmoke123!"
+pg_exec -c "DELETE FROM users WHERE email='${EXPIRE_BUYER}'" >/dev/null || true
+EXPIRE_REG=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/auth/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"request_id\":\"tp-expire\",\"email\":\"${EXPIRE_BUYER}\",\"password\":\"${EXPIRE_PASS}\",\"display_name\":\"Expire Buyer\",\"client_type\":\"app\"}") || true
+EXPIRE_TOKEN=$(echo "${EXPIRE_REG}" | quiet_json "access_token")
+EXPIRE_ID=$(echo "${EXPIRE_REG}" | quiet_json "user.user_id")
+pg_exec -c "INSERT INTO points_ledger (id, user_id, direction, amount, balance_after, source_type, source_id, status, created_at) SELECT gen_random_uuid(), '${EXPIRE_ID}', 'credit', ${SEED_AMOUNT}, ${SEED_AMOUNT}, 'manual_adjustment', 'traffic-expire-seed', 'posted', now() WHERE EXISTS (SELECT 1 FROM users WHERE id='${EXPIRE_ID}')" >/dev/null
+curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
+  -H "Authorization: Bearer ${EXPIRE_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"plan_id\":\"${PLAN_ID}\",\"idempotency_key\":\"expire-$(date +%s)\",\"payment_method\":\"points\"}" >/dev/null || true
+pg_exec -c "UPDATE user_traffic_entitlements SET ends_at = NOW() - INTERVAL '1 hour' WHERE user_id='${EXPIRE_ID}'" >/dev/null || true
+EXPIRE_JOB=$(curl -sS --max-time 10 -X POST "${API_BASE}/internal/job-executors/traffic-package/entitlement-expire" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d '{}') || true
+EXPIRE_OK=$(echo "${EXPIRE_JOB}" | quiet_json "ok")
+EXPIRE_COUNT=$(echo "${EXPIRE_JOB}" | quiet_json "processed_count")
+EXPIRE_STATUS=$(pg_exec -c "SELECT status FROM user_traffic_entitlements WHERE user_id='${EXPIRE_ID}' ORDER BY created_at DESC LIMIT 1")
+[[ "${EXPIRE_OK}" == "True" || "${EXPIRE_OK}" == "true" ]] && pass "entitlement-expire job ok (count=${EXPIRE_COUNT})" || fail "entitlement-expire (${EXPIRE_JOB})"
+[[ "${EXPIRE_STATUS}" == "expired" ]] && pass "entitlement expired in DB" || fail "expire status (${EXPIRE_STATUS})"
 
 echo ""
 echo "========================================"
