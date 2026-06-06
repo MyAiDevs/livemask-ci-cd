@@ -6,12 +6,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKEND_ROOT="${BACKEND_ROOT:-${SCRIPT_DIR}/../livemask-backend}"
-JOB_ROOT="${JOB_ROOT:-${SCRIPT_DIR}/../livemask-job-service}"
+BACKEND_ROOT="${BACKEND_ROOT:-${SCRIPT_DIR}/../../livemask-backend}"
+JOB_ROOT="${JOB_ROOT:-${SCRIPT_DIR}/../../livemask-job-service}"
 COMPOSE_FILE="${COMPOSE_FILE:-infra/docker-compose.staging.yml}"
 BACKEND_HTTP_PORT="${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
 API_BASE="http://127.0.0.1:${BACKEND_HTTP_PORT}"
-INTERNAL_SECRET="${INTERNAL_JOB_SECRET:-test-internal-secret}"
+INTERNAL_SECRET="${INTERNAL_JOB_SECRET:-${INTERNAL_SERVICE_SECRET:-local-dev-secret}}"
 
 FAILED=0
 SUMMARY_LINES=()
@@ -184,6 +184,15 @@ ORDER2_ID=$(echo "${ORDER2}" | quiet_json "order.id")
 
 ESCROW_ROW=$(pg_exec -c "SELECT COUNT(*) FROM points_ledger WHERE user_id='${BUYER_ID}' AND source_type='market_escrow_debit' AND source_id='${ORDER_ID}'")
 [[ "${ESCROW_ROW}" == "1" ]] && pass "escrow debit ledger row" || fail "escrow debit ledger (count=${ESCROW_ROW})"
+
+BAL_RESP=$(curl -sS --max-time 5 "${API_BASE}/api/v1/me/points/balance" \
+  -H "Authorization: Bearer ${BUYER_TOKEN}") || true
+AVAIL_BAL=$(echo "${BAL_RESP}" | quiet_json "available_balance")
+FROZEN_BAL=$(echo "${BAL_RESP}" | quiet_json "frozen_balance")
+BAL_CURRENCY=$(echo "${BAL_RESP}" | quiet_json "currency")
+[[ "${BAL_CURRENCY}" == "points" ]] && pass "balance currency=points" || fail "balance currency (${BAL_CURRENCY})"
+[[ "${FROZEN_BAL}" == "1000" ]] && pass "frozen_balance=1000 after escrow" || fail "frozen_balance (got ${FROZEN_BAL})"
+[[ "${AVAIL_BAL}" == "49000" ]] && pass "available_balance=49000 after escrow" || fail "available_balance (got ${AVAIL_BAL})"
 
 # ── Confirm fulfilled ──────────────────────────────────────────────────────────
 echo ""
