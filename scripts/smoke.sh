@@ -1069,6 +1069,18 @@ if [[ "${RUN_AUTO_TASK_ASSIGNMENT_SMOKE:-}" == "1" ]]; then
 fi
 
 echo ""
+# ── C2C Points Market Smoke (TASK-C2C-POINTS-MARKET-PORTAL-AND-SMOKE-001) ──
+echo "=== Smoke: C2C Points Market (listing → escrow → settle) ==="
+if bash "${SCRIPT_DIR}/c2c-points-market-smoke.sh" 2>&1; then
+  echo "C2C points market smoke PASSED."
+else
+  c2c_rc=$?
+  echo ""
+  echo "=== C2C Points Market Smoke FAILED ==="
+  exit ${c2c_rc}
+fi
+
+echo ""
 # ── Three-Level Reward Smoke (TASK-CICD-THREE-LEVEL-REWARD-SMOKE-001) ──
 echo "=== Smoke: Three-Level Reward (TASK-CICD-THREE-LEVEL-REWARD-SMOKE-001) ==="
 if bash "${SCRIPT_DIR}/three-level-reward-smoke.sh" 2>&1; then
