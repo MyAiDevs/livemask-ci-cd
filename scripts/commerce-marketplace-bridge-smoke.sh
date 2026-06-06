@@ -387,6 +387,15 @@ BILL_POINTS=$(echo "${BILL_LEDGER}" | python3 -c "import sys,json; d=json.load(s
 [[ "${BILL_POINTS}" == "True" ]] && pass "billing ledger includes points family" || fail "billing ledger family (${BILL_LEDGER})"
 
 echo ""
+echo "--- [18] Billing ledger summary ---"
+BILL_SUM=$(curl -sS --max-time 10 -X GET "${API_BASE}/admin/api/v1/billing/summary?user_id=${BUYER_ID}" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+BILL_SUM_TOTAL=$(echo "${BILL_SUM}" | quiet_json "total_entries")
+[[ "${BILL_SUM_TOTAL}" -ge 1 ]] 2>/dev/null && pass "billing summary total_entries (${BILL_SUM_TOTAL})" || fail "billing summary (${BILL_SUM})"
+BILL_SUM_POINTS=$(echo "${BILL_SUM}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(any((r.get('currency')=='POINTS') for r in (d.get('by_currency') or [])))" 2>/dev/null || echo "False")
+[[ "${BILL_SUM_POINTS}" == "True" ]] && pass "billing summary includes POINTS currency" || fail "billing summary currency (${BILL_SUM})"
+
+echo ""
 echo "--- [7] Idempotent package replay (no double return) ---"
 PKG_ORDER2=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
   -H "Authorization: Bearer ${BUYER_TOKEN}" \
