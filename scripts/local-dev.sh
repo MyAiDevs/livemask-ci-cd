@@ -293,9 +293,10 @@ run_sync() {
   # MODE 2: --services / default (legacy behaviour, now using sync lib)
   # -----------------------------------------------------------------------
   services_to_sync=()
+  # Bash 3.2 (macOS default) treats "${arr[@]}" on an empty array as unbound under set -u.
   while IFS= read -r service; do
     [[ -n "${service}" ]] && services_to_sync+=("${service}")
-  done < <(expand_services "${clean_args[@]}")
+  done < <(expand_services ${clean_args+"${clean_args[@]}"})
   if [[ "${#services_to_sync[@]}" -eq 0 ]]; then
     echo "[sync] no services selected" >&2
     exit 2
