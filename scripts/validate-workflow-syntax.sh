@@ -148,6 +148,7 @@ echo
 echo "=== Validate Docker compose configs ==="
 docker compose -f infra/docker-compose.staging.yml config >/tmp/livemask-staging-compose.yml
 docker compose -f infra/docker-compose.local.yml config >/tmp/livemask-local-compose.yml
+docker compose -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml config >/tmp/livemask-local-hot-compose.yml
 
 echo
 echo "=== Validate shell syntax ==="

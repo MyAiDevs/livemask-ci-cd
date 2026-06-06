@@ -13,12 +13,18 @@ else
   shift || true
 fi
 
+LOCAL_COMPOSE_LIB="${SCRIPT_DIR}/lib/local-compose.sh"
+if [[ -f "${LOCAL_COMPOSE_LIB}" ]]; then
+  # shellcheck source=scripts/lib/local-compose.sh
+  source "${LOCAL_COMPOSE_LIB}"
+fi
+
 env_file=""
 compose_file="${REPO_DIR}/infra/docker-compose.local.yml"
 runtime_mode="local"
 services="backend"
 with_deps=true
-auto_reload=false
+hot_reload_enabled=true
 pull_images=false
 
 usage() {
@@ -37,8 +43,13 @@ Options:
   --mode local|runtime     local=source-mounted containers, runtime=image deployment.
   --services LIST          Comma-separated: backend,admin,website,nodeagent,job-service,all.
   --no-deps                Do not start internal PostgreSQL/Redis containers.
-  --auto-reload            Backend hot reload in local mode.
+  --no-hot-reload          Disable docker-compose.hot.yml overlay (Go rebuild loop + dev polling).
+  --auto-reload            Alias for default local hot reload (kept for compatibility).
   --pull                   Pull images before start.
+
+Local mode enables hot reload by default:
+  - Backend / Job Service / NodeAgent: mounted Go source checksum watcher
+  - Admin / Website: dev-server HMR with Docker Desktop polling
 
 Examples:
   bash scripts/runtime.sh start --mode local --services all
@@ -101,6 +112,7 @@ while [[ $# -gt 0 ]]; do
         runtime)
           runtime_mode="runtime"
           compose_file="${REPO_DIR}/infra/docker-compose.runtime.yml"
+          hot_reload_enabled=false
           ;;
         *)
           echo "Unknown mode: $2" >&2
@@ -117,8 +129,12 @@ while [[ $# -gt 0 ]]; do
       with_deps=false
       shift
       ;;
+    --no-hot-reload)
+      hot_reload_enabled=false
+      shift
+      ;;
     --auto-reload)
-      auto_reload=true
+      hot_reload_enabled=true
       shift
       ;;
     --pull)
@@ -190,20 +206,39 @@ fi
 
 compose_base() {
   local args=()
+  local compose_files=()
+  local file
+
   [[ "${env_file}" != "" ]] && args+=(--env-file "${env_file}")
   for profile in "${profiles[@]:-}"; do
     args+=(--profile "${profile}")
   done
-  docker compose "${args[@]}" -f "${compose_file}" "$@"
+
+  if [[ "${runtime_mode}" == "local" && "${hot_reload_enabled}" == "true" ]]; then
+    while IFS= read -r file; do
+      [[ -n "${file}" ]] && compose_files+=(-f "${file}")
+    done < <(local_compose_file_args "${REPO_DIR}" "${compose_file}" true)
+  else
+    compose_files=(-f "${compose_file}")
+  fi
+
+  docker compose "${args[@]}" "${compose_files[@]}" "$@"
 }
 
-export BACKEND_COMMAND="/usr/local/go/bin/go run ."
-if [[ "${auto_reload}" == "true" ]]; then
-  export BACKEND_COMMAND="export PATH=/usr/local/go/bin:/go/bin:\${PATH}; /usr/local/go/bin/go install github.com/air-verse/air@latest && /go/bin/air"
-fi
+print_hot_reload_mode() {
+  if [[ "${runtime_mode}" != "local" ]]; then
+    return 0
+  fi
+  if [[ "${hot_reload_enabled}" == "true" ]] && local_compose_hot_reload_enabled; then
+    echo "Local hot reload: ENABLED (docker-compose.hot.yml overlay)"
+  else
+    echo "Local hot reload: DISABLED (plain go run / no polling overlay)"
+  fi
+}
 
 case "${command}" in
   start)
+    print_hot_reload_mode
     [[ "${pull_images}" == "true" ]] && compose_base pull "${service_args[@]}"
     compose_base up -d --force-recreate "${service_args[@]}"
     ;;
@@ -211,12 +246,15 @@ case "${command}" in
     compose_base down --remove-orphans
     ;;
   restart)
+    print_hot_reload_mode
     compose_base down --remove-orphans
     [[ "${pull_images}" == "true" ]] && compose_base pull "${service_args[@]}"
     compose_base up -d --force-recreate "${service_args[@]}"
     ;;
   status)
     compose_base ps -a
+    echo
+    print_hot_reload_mode
     echo
     print_local_urls
     echo

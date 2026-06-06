@@ -90,6 +90,8 @@ services:
     environment:
       BACKEND_INTERNAL_URL: "http://backend:8080"
       NEXT_TELEMETRY_DISABLED: "1"
+      WATCHPACK_POLLING: "${WATCHPACK_POLLING:-true}"
+      CHOKIDAR_USEPOLLING: "${CHOKIDAR_USEPOLLING:-true}"
     ports:
       - "${LIVEMASK_ADMIN_PORT:-3001}:3000"
     volumes:
@@ -107,6 +109,7 @@ services:
     command: ["sh", "-lc", "npm install --no-audit --no-fund || (rm -rf node_modules && npm install --no-audit --no-fund); npm run dev -- --host 0.0.0.0 --port 5173"]
     environment:
       VITE_API_BASE_URL: "http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
+      CHOKIDAR_USEPOLLING: "${CHOKIDAR_USEPOLLING:-true}"
     ports:
       - "${LIVEMASK_WEBSITE_PORT:-3002}:5173"
     volumes:

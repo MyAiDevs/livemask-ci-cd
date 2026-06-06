@@ -251,12 +251,24 @@ lm_sync_execute() {
   local sync_repo_root
   # sync.sh lives in scripts/lib/; repo root is two directories up
   sync_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-  compose_file="${REPO_DIR:-${sync_repo_root}}/infra/docker-compose.local.yml"
+  local sync_repo="${REPO_DIR:-${sync_repo_root}}"
+  compose_file="${sync_repo}/infra/docker-compose.local.yml"
+  local hot_compose_file="${sync_repo}/infra/docker-compose.hot.yml"
+  local compose_file_args=(-f "${compose_file}")
 
   if [[ ! -f "${compose_file}" ]]; then
     echo "  ERROR: Compose file not found: ${compose_file}" >&2
     return 1
   fi
+
+  case "${LIVEMASK_LOCAL_HOT_RELOAD:-true}" in
+    0|false|FALSE|no|NO|off|OFF) ;;
+    *)
+      if [[ -f "${hot_compose_file}" ]]; then
+        compose_file_args+=(-f "${hot_compose_file}")
+      fi
+      ;;
+  esac
 
   # Build profiles and service list for targeted compose command
   local profiles=()
@@ -304,9 +316,9 @@ lm_sync_execute() {
   # Execute targeted compose up — use full path for -f
   set +e
   if [[ "${#unique_profiles[@]}" -gt 0 ]]; then
-    docker compose -f "${compose_file}" "${unique_profiles[@]}" up -d --force-recreate "${svc_list[@]}"
+    docker compose "${compose_file_args[@]}" "${unique_profiles[@]}" up -d --force-recreate "${svc_list[@]}"
   else
-    docker compose -f "${compose_file}" up -d --force-recreate "${svc_list[@]}"
+    docker compose "${compose_file_args[@]}" up -d --force-recreate "${svc_list[@]}"
   fi
   local exit_code=$?
   set -e
