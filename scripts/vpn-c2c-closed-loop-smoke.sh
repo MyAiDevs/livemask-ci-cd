@@ -3,7 +3,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export COMPOSE_FILE="${COMPOSE_FILE:-${SCRIPT_DIR}/../infra/docker-compose.local.yml}"
+COMPOSE_FILE="${COMPOSE_FILE:-${SCRIPT_DIR}/../infra/docker-compose.local.yml}"
+if [[ "${COMPOSE_FILE}" != /* ]]; then
+  COMPOSE_FILE="${SCRIPT_DIR}/../${COMPOSE_FILE}"
+fi
+COMPOSE_FILE="$(cd "$(dirname "${COMPOSE_FILE}")" && pwd)/$(basename "${COMPOSE_FILE}")"
+export COMPOSE_FILE
 
 FAILED=0
 SUMMARY_LINES=()

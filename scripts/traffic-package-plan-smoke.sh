@@ -5,6 +5,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_ROOT="${BACKEND_ROOT:-${SCRIPT_DIR}/../../livemask-backend}"
 COMPOSE_FILE="${COMPOSE_FILE:-${SCRIPT_DIR}/../infra/docker-compose.local.yml}"
+if [[ "${COMPOSE_FILE}" != /* ]]; then
+  COMPOSE_FILE="${SCRIPT_DIR}/../${COMPOSE_FILE}"
+fi
+COMPOSE_FILE="$(cd "$(dirname "${COMPOSE_FILE}")" && pwd)/$(basename "${COMPOSE_FILE}")"
 BACKEND_HTTP_PORT="${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
 API_BASE="http://127.0.0.1:${BACKEND_HTTP_PORT}"
 INTERNAL_SECRET="${INTERNAL_JOB_SECRET:-${INTERNAL_SERVICE_SECRET:-local-dev-secret}}"
@@ -42,8 +46,7 @@ echo "========================================"
 
 echo ""
 echo "--- [unit] trafficpackage tests ---"
-cd "$BACKEND_ROOT"
-go test ./internal/trafficpackage/... -count=1 -timeout 3m
+( cd "$BACKEND_ROOT" && go test ./internal/trafficpackage/... -count=1 -timeout 3m )
 pass "trafficpackage unit tests"
 
 echo ""
@@ -284,6 +287,42 @@ if [[ -n "${NODE_ID}" && -n "${NODE_SECRET}" ]]; then
 else
   fail "node register for Gate D (${NODE_REG})"
 fi
+
+echo ""
+echo "--- [12] Traffic usage aggregate job ---"
+AGG_JOB=$(curl -sS --max-time 10 -X POST "${API_BASE}/internal/job-executors/traffic-package/usage-aggregate" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d '{}') || true
+AGG_OK=$(echo "${AGG_JOB}" | quiet_json "ok")
+AGG_COUNT=$(echo "${AGG_JOB}" | quiet_json "processed_count")
+[[ "${AGG_OK}" == "True" || "${AGG_OK}" == "true" ]] && [[ "${AGG_COUNT}" -ge 1 ]] 2>/dev/null && pass "usage-aggregate ok (count=${AGG_COUNT})" || fail "usage-aggregate (${AGG_JOB})"
+
+echo ""
+echo "--- [13] Traffic anomaly detect (over-quota remediate) ---"
+pg_exec -c "UPDATE user_traffic_entitlements SET status='active', traffic_used_bytes = traffic_quota_bytes + 1024 WHERE id = (SELECT id FROM user_traffic_entitlements WHERE user_id='${BUYER_ID}' ORDER BY created_at DESC LIMIT 1)" >/dev/null
+ANOM_JOB=$(curl -sS --max-time 10 -X POST "${API_BASE}/internal/job-executors/traffic-package/anomaly-detect" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d '{"limit":10}') || true
+ANOM_OK=$(echo "${ANOM_JOB}" | quiet_json "ok")
+ANOM_COUNT=$(echo "${ANOM_JOB}" | quiet_json "processed_count")
+ANOM_STATUS=$(pg_exec -c "SELECT status FROM user_traffic_entitlements WHERE user_id='${BUYER_ID}' ORDER BY updated_at DESC LIMIT 1")
+[[ "${ANOM_OK}" == "True" || "${ANOM_OK}" == "true" ]] && [[ "${ANOM_COUNT}" -ge 1 ]] 2>/dev/null && pass "anomaly-detect ok (count=${ANOM_COUNT})" || fail "anomaly-detect (${ANOM_JOB})"
+[[ "${ANOM_STATUS}" == "exhausted" ]] && pass "over-quota entitlement exhausted" || fail "entitlement status (${ANOM_STATUS})"
+
+echo ""
+echo "--- [14] Points return reversal on refunded order ---"
+pg_exec -c "UPDATE traffic_package_orders SET status='refunded' WHERE id='${ORDER_ID}'" >/dev/null
+REV_JOB=$(curl -sS --max-time 10 -X POST "${API_BASE}/internal/job-executors/traffic-package/points-return-reversal" \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+  -d '{"limit":10}') || true
+REV_OK=$(echo "${REV_JOB}" | quiet_json "ok")
+REV_COUNT=$(echo "${REV_JOB}" | quiet_json "processed_count")
+REV_ROWS=$(pg_exec -c "SELECT COUNT(*) FROM points_ledger WHERE user_id='${BUYER_ID}' AND source_type='traffic_package_points_return_reversal' AND source_id='${ORDER_ID}:reversal'")
+[[ "${REV_OK}" == "True" || "${REV_OK}" == "true" ]] && [[ "${REV_COUNT}" -ge 1 ]] 2>/dev/null && pass "points-return-reversal ok (count=${REV_COUNT})" || fail "points-return-reversal (${REV_JOB})"
+[[ "${REV_ROWS}" == "1" ]] && pass "reversal ledger row posted" || fail "reversal ledger (count=${REV_ROWS})"
 
 echo ""
 echo "========================================"
