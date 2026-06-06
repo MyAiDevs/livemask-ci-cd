@@ -430,6 +430,19 @@ ADMIN_ME_BILL=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" -X GET "${A
 [[ "${ADMIN_ME_BILL}" == "401" || "${ADMIN_ME_BILL}" == "403" ]] && pass "me billing requires auth (${ADMIN_ME_BILL})" || fail "me billing auth leak (${ADMIN_ME_BILL})"
 
 echo ""
+echo "--- [21] Ambassador self-service ledger (L1 owner-only) ---"
+AMB_LEDGER=$(curl -sS --max-time 10 -X GET "${API_BASE}/api/v1/me/ambassador/ledger?limit=10" \
+  -H "Authorization: Bearer ${L1_TOKEN}") || true
+AMB_TOTAL=$(echo "${AMB_LEDGER}" | quiet_json "total")
+[[ "${AMB_TOTAL}" -ge 1 ]] 2>/dev/null && pass "ambassador ledger L1 total (${AMB_TOTAL})" || fail "ambassador ledger L1 (${AMB_LEDGER})"
+AMB_L1=$(echo "${AMB_LEDGER}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(any((e.get('attribution_level')=='l1' and e.get('points_delta')==100) for e in (d.get('items') or [])))" 2>/dev/null || echo "False")
+[[ "${AMB_L1}" == "True" ]] && pass "ambassador ledger L1 reward row" || fail "ambassador ledger row (${AMB_LEDGER})"
+BUYER_AMB=$(curl -sS --max-time 5 -X GET "${API_BASE}/api/v1/me/ambassador/ledger" \
+  -H "Authorization: Bearer ${BUYER_TOKEN}") || true
+BUYER_AMB_TOTAL=$(echo "${BUYER_AMB}" | quiet_json "total")
+[[ "${BUYER_AMB_TOTAL}" -ge 0 ]] 2>/dev/null && pass "buyer ambassador ledger scoped (${BUYER_AMB_TOTAL})" || fail "buyer ambassador ledger (${BUYER_AMB})"
+
+echo ""
 echo "--- [7] Idempotent package replay (no double return) ---"
 PKG_ORDER2=$(curl -sS --max-time 10 -X POST "${API_BASE}/api/v1/traffic-package-orders" \
   -H "Authorization: Bearer ${BUYER_TOKEN}" \
