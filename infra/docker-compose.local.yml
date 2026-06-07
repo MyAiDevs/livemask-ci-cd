@@ -147,12 +147,16 @@ services:
       SINGBOX_MANIFEST_PLATFORM: "${SINGBOX_MANIFEST_PLATFORM:-linux-amd64-musl}"
       SINGBOX_MANIFEST_ARCH: "${SINGBOX_MANIFEST_ARCH:-amd64}"
       SINGBOX_MANIFEST_POLL_INTERVAL_SEC: "${SINGBOX_MANIFEST_POLL_INTERVAL_SEC:-300}"
+      # LAN dev: bind sing-box on all interfaces so phones on the same Wi‑Fi can reach the proxy port.
+      SINGBOX_LISTEN_HOST: "${SINGBOX_LISTEN_HOST:-0.0.0.0}"
+      SINGBOX_LISTEN_PORT: "${SINGBOX_LISTEN_PORT:-10808}"
       GOPROXY: "${GOPROXY:-https://goproxy.cn,direct}"
       GOCACHE: /workspace/.cache/go-build
       GOMODCACHE: /workspace/.cache/go/pkg/mod
       PATH: /usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     ports:
       - "${LIVEMASK_NODEAGENT_PORT:-19090}:9100"
+      - "${SINGBOX_LISTEN_PORT:-10808}:10808"
     volumes:
       - ${LIVEMASK_WORKSPACE_ROOT:-/Users/sammytan/Developer/LiveMask}/livemask-nodeagent:/workspace/livemask-nodeagent
       - livemask-local-nodeagent-state:/workspace/.state
