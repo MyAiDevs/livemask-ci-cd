@@ -123,7 +123,7 @@ services:
     profiles: ["nodeagent"]
     working_dir: /workspace/livemask-nodeagent
     restart: unless-stopped
-    command: ["sh", "-lc", "sh /workspace/livemask-nodeagent/scripts/install-singbox.sh /usr/local/bin && /usr/local/go/bin/go run ./cmd/nodeagent"]
+    command: ["sh", "-lc", "apk add --no-cache openssl >/dev/null 2>&1 || true; sh /workspace/livemask-nodeagent/scripts/install-singbox.sh /usr/local/bin && sh /workspace/livemask-nodeagent/scripts/ensure-dev-hy2-tls.sh && /usr/local/go/bin/go run ./cmd/nodeagent"]
     environment:
       BACKEND_BASE_URL: "${BACKEND_BASE_URL:-http://backend:8080}"
       BACKEND_CONFIG_URL: "${BACKEND_CONFIG_URL:-http://backend:8080/internal/agent/config}"
@@ -149,14 +149,21 @@ services:
       SINGBOX_MANIFEST_POLL_INTERVAL_SEC: "${SINGBOX_MANIFEST_POLL_INTERVAL_SEC:-300}"
       # LAN dev: bind sing-box on all interfaces so phones on the same Wi‑Fi can reach the proxy port.
       SINGBOX_LISTEN_HOST: "${SINGBOX_LISTEN_HOST:-0.0.0.0}"
-      SINGBOX_LISTEN_PORT: "${SINGBOX_LISTEN_PORT:-10808}"
+      SINGBOX_LISTEN_PORT: "${SINGBOX_LISTEN_PORT:-8443}"
+      # LAN IP/hostname phones use to reach this node (must match connect_node_endpoints).
+      SINGBOX_PUBLIC_ENDPOINT_HOST: "${SINGBOX_PUBLIC_ENDPOINT_HOST:-192.168.1.64}"
+      SINGBOX_PUBLIC_ENDPOINT_PORT: "${SINGBOX_PUBLIC_ENDPOINT_PORT:-8443}"
+      # Required when protocol_profile=hysteria2 (static fallback auth; per-session auth layered on top).
+      HYSTERIA2_AUTH: "${HYSTERIA2_AUTH:-local-dev-hy2-auth}"
+      NODEAGENT_TLS_CERT_PATH: "${NODEAGENT_TLS_CERT_PATH:-/workspace/.state/dev-hy2-tls/cert.pem}"
+      NODEAGENT_TLS_KEY_PATH: "${NODEAGENT_TLS_KEY_PATH:-/workspace/.state/dev-hy2-tls/key.pem}"
       GOPROXY: "${GOPROXY:-https://goproxy.cn,direct}"
       GOCACHE: /workspace/.cache/go-build
       GOMODCACHE: /workspace/.cache/go/pkg/mod
       PATH: /usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     ports:
       - "${LIVEMASK_NODEAGENT_PORT:-19090}:9100"
-      - "${SINGBOX_LISTEN_PORT:-10808}:10808"
+      - "${SINGBOX_LISTEN_PORT:-8443}:8443/udp"
     volumes:
       - ${LIVEMASK_WORKSPACE_ROOT:-/Users/sammytan/Developer/LiveMask}/livemask-nodeagent:/workspace/livemask-nodeagent
       - livemask-local-nodeagent-state:/workspace/.state
