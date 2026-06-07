@@ -372,6 +372,19 @@ else
 fi
 
 echo ""
+echo "--- [12a] POST reconnect-events ---"
+RECONNECT_EVT_RESP=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/connect/session/${SESSION_ID}/reconnect-events" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${USER_TOKEN}" \
+  -d '{"event_type":"reconnectHintReceived","hint_id":"smoke-hint-1"}') || true
+RECONNECT_EVT_OK=$(echo "${RECONNECT_EVT_RESP}" | quiet_json "ok")
+if [[ "${RECONNECT_EVT_OK}" != "True" ]]; then
+  fail "reconnect-events - (response: $(echo ${RECONNECT_EVT_RESP} | head -c 300))"
+else
+  pass "reconnect-events OK"
+fi
+
+echo ""
 echo "--- [13] POST Disconnect ---"
 DISCONNECT_RESP=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/connect/session/${SESSION_ID}/disconnect" \
   -H "Content-Type: application/json" \
