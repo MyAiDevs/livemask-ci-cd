@@ -332,6 +332,82 @@ RISK_OK=$(echo "${RISK}" | quiet_json "ok")
 [[ "${RISK_OK}" == "True" || "${RISK_OK}" == "true" ]] && pass "risk-hold-scan ok" || fail "risk-hold-scan (${RISK})"
 
 echo ""
+echo "--- [11] Refund reconcile (cancelled order) ---"
+if [[ -n "${USER_LISTING_ID}" && -n "${BUYER_TOKEN}" ]]; then
+  REFUND_IDEM="c2c-smoke-refund-$(date +%s)"
+  REFUND_ORDER=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/points-market/orders" \
+    -H "Authorization: Bearer ${BUYER_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{\"listing_id\":\"${USER_LISTING_ID}\",\"idempotency_key\":\"${REFUND_IDEM}\"}") || true
+  REFUND_ORDER_ID=$(echo "${REFUND_ORDER}" | quiet_json "order.id")
+  REFUND_PRE=$(echo "${REFUND_ORDER}" | quiet_json "order.status")
+  if [[ -n "${REFUND_ORDER_ID}" && "${REFUND_PRE}" == "escrowed" ]]; then
+    pass "refund-path order escrowed ${REFUND_ORDER_ID}"
+    pg_exec -c "UPDATE points_market_orders SET status='cancelled' WHERE id='${REFUND_ORDER_ID}'" >/dev/null || true
+    CANCELLED_STATUS=$(pg_exec -c "SELECT status FROM points_market_orders WHERE id='${REFUND_ORDER_ID}'")
+    [[ "${CANCELLED_STATUS}" == "cancelled" ]] && pass "order marked cancelled for reconcile" || fail "cancelled status (${CANCELLED_STATUS})"
+
+    REFUND_RECON=$(curl -sS --max-time 10 -X POST "${API_BASE}/internal/job-executors/points-market/refund-reconcile" \
+      -H "Content-Type: application/json" \
+      -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+      -d '{}') || true
+    REFUND_OK=$(echo "${REFUND_RECON}" | quiet_json "ok")
+    REFUND_COUNT=$(echo "${REFUND_RECON}" | quiet_json "processed_count")
+    [[ "${REFUND_OK}" == "True" || "${REFUND_OK}" == "true" ]] && pass "refund-reconcile ok (count=${REFUND_COUNT})" || fail "refund-reconcile (${REFUND_RECON})"
+
+    REFUND_FINAL=$(pg_exec -c "SELECT status FROM points_market_orders WHERE id='${REFUND_ORDER_ID}'")
+    [[ "${REFUND_FINAL}" == "refunded" ]] && pass "order refunded in DB" || fail "refund final status (${REFUND_FINAL})"
+
+    REFUND_LEDGER=$(pg_exec -c "SELECT COUNT(*) FROM points_ledger WHERE user_id='${BUYER_ID}' AND source_type='market_refund_credit' AND source_id='${REFUND_ORDER_ID}:refund'")
+    [[ "${REFUND_LEDGER}" == "1" ]] && pass "buyer market_refund_credit ledger row" || fail "refund ledger (count=${REFUND_LEDGER})"
+  else
+    fail "refund-path order create (status=${REFUND_PRE})"
+  fi
+else
+  skip "refund reconcile: missing listing or buyer token"
+fi
+
+echo ""
+echo "--- [12] Website portal API probe (client_type=website) ---"
+WEBSITE_EMAIL="c2c-smoke-website@test.livemask"
+WEBSITE_PASS="C2cSmoke123!"
+pg_exec -c "DELETE FROM users WHERE email='${WEBSITE_EMAIL}'" >/dev/null || true
+WEBSITE_REG=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/auth/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"request_id\":\"c2c-smoke-website\",\"email\":\"${WEBSITE_EMAIL}\",\"password\":\"${WEBSITE_PASS}\",\"display_name\":\"C2C Website\",\"client_type\":\"website\"}") || true
+WEBSITE_TOKEN=$(echo "${WEBSITE_REG}" | quiet_json "access_token")
+if [[ -z "${WEBSITE_TOKEN}" ]]; then
+  WEBSITE_LOGIN=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"request_id\":\"c2c-smoke-website-login\",\"email\":\"${WEBSITE_EMAIL}\",\"password\":\"${WEBSITE_PASS}\",\"client_type\":\"website\"}") || true
+  WEBSITE_TOKEN=$(echo "${WEBSITE_LOGIN}" | quiet_json "access_token")
+fi
+if [[ -n "${WEBSITE_TOKEN}" ]]; then
+  pass "website user auth"
+  WEB_LIST_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+    "${API_BASE}/api/v1/points-market/listings" \
+    -H "Authorization: Bearer ${WEBSITE_TOKEN}") || true
+  [[ "${WEB_LIST_HTTP}" == "200" ]] && pass "website listings GET 200" || fail "website listings (http=${WEB_LIST_HTTP})"
+
+  WEB_ORD_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+    "${API_BASE}/api/v1/points-market/orders" \
+    -H "Authorization: Bearer ${WEBSITE_TOKEN}") || true
+  [[ "${WEB_ORD_HTTP}" == "200" ]] && pass "website orders GET 200" || fail "website orders (http=${WEB_ORD_HTTP})"
+
+  WEB_BAL_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+    "${API_BASE}/api/v1/me/points/balance" \
+    -H "Authorization: Bearer ${WEBSITE_TOKEN}") || true
+  [[ "${WEB_BAL_HTTP}" == "200" ]] && pass "website points balance GET 200" || fail "website balance (http=${WEB_BAL_HTTP})"
+
+  WEB_LEDGER_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+    "${API_BASE}/api/v1/me/points/ledger?limit=5" \
+    -H "Authorization: Bearer ${WEBSITE_TOKEN}") || true
+  [[ "${WEB_LEDGER_HTTP}" == "200" ]] && pass "website points ledger GET 200" || fail "website ledger (http=${WEB_LEDGER_HTTP})"
+else
+  fail "website user auth"
+fi
+
+echo ""
 echo "========================================"
 printf '%s\n' "${SUMMARY_LINES[@]}"
 if [[ "${FAILED}" -ne 0 ]]; then

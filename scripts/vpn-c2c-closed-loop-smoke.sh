@@ -33,7 +33,8 @@ echo "========================================"
 echo " VPN/C2C Closed Loop Smoke (Gates A+B+C)"
 echo "========================================"
 
-run_smoke "Gate A — C2C baseline" "c2c-points-market-smoke.sh"
+# Gate A includes escrow/settle, refund-reconcile [11], and website portal API probe [12].
+run_smoke "Gate A — C2C baseline (+ refund + website)" "c2c-points-market-smoke.sh"
 run_smoke "Gate B — Traffic package" "traffic-package-plan-smoke.sh"
 run_smoke "Gate C — Package→C2C bridge" "commerce-marketplace-bridge-smoke.sh"
 
