@@ -13,6 +13,7 @@ RUN if [ ! -f /src/go.mod ]; then \
     fi
 
 WORKDIR /src
+RUN apk add --no-cache bash python3 openssl
 RUN go mod download
 ARG NODEAGENT_USE_GARBLE=0
 ARG NODEAGENT_VERSION=dev
