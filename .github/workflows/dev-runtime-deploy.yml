@@ -31,8 +31,13 @@ jobs:
       POSTGRES_PORT: "15432"
       REDIS_PORT: "16379"
       LIVEMASK_PUBLIC_HOST: "47.243.128.122"
-      PUBLIC_API_BASE_URL: "http://47.243.128.122:18080"
-      CORS_ALLOWED_ORIGINS: "http://47.243.128.122:3001,http://47.243.128.122:3002,http://127.0.0.1:3001,http://127.0.0.1:3002,http://localhost:3001,http://localhost:3002"
+      PUBLIC_API_BASE_URL: "https://api.livemask-vpn.com"
+      CORS_ALLOWED_ORIGINS: "https://api.livemask-vpn.com,https://livemask-vpn.com,https://www.livemask-vpn.com,https://admin.livemask-vpn.com,https://api.vpn-mirrors.xyz,https://vpn-mirrors.xyz,https://api.vpn-mirrors.cfd,https://vpn-mirrors.cfd,http://47.243.128.122:3001,http://47.243.128.122:3002,http://127.0.0.1:3001,http://127.0.0.1:3002"
+      SINGBOX_PUBLIC_ENDPOINT_HOST: "47.243.128.122"
+      SINGBOX_PUBLIC_ENDPOINT_PORT: "8443"
+      NODEAGENT_TLS_CERT_PATH: "/etc/livemask/hy2-tls/fullchain.pem"
+      NODEAGENT_TLS_KEY_PATH: "/etc/livemask/hy2-tls/privkey.pem"
+      HY2_TLS_CERT_DIR: "/etc/letsencrypt/live/livemask-vpn.com"
     runs-on:
       group: livemask-staging
       labels: [self-hosted, Linux, livemask, docker, staging]
