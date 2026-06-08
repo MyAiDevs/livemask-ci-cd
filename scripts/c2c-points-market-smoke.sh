@@ -8,7 +8,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_ROOT="${BACKEND_ROOT:-${SCRIPT_DIR}/../../livemask-backend}"
 JOB_ROOT="${JOB_ROOT:-${SCRIPT_DIR}/../../livemask-job-service}"
-COMPOSE_FILE="${COMPOSE_FILE:-infra/docker-compose.staging.yml}"
+COMPOSE_FILE="${COMPOSE_FILE:-${SCRIPT_DIR}/../infra/docker-compose.local.yml}"
+if [[ "${COMPOSE_FILE}" != /* ]]; then
+  COMPOSE_FILE="${SCRIPT_DIR}/../${COMPOSE_FILE}"
+fi
+COMPOSE_FILE="$(cd "$(dirname "${COMPOSE_FILE}")" && pwd)/$(basename "${COMPOSE_FILE}")"
 BACKEND_HTTP_PORT="${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
 API_BASE="http://127.0.0.1:${BACKEND_HTTP_PORT}"
 INTERNAL_SECRET="${INTERNAL_JOB_SECRET:-${INTERNAL_SERVICE_SECRET:-local-dev-secret}}"
@@ -405,6 +409,93 @@ if [[ -n "${WEBSITE_TOKEN}" ]]; then
   [[ "${WEB_LEDGER_HTTP}" == "200" ]] && pass "website points ledger GET 200" || fail "website ledger (http=${WEB_LEDGER_HTTP})"
 else
   fail "website user auth"
+fi
+
+echo ""
+echo "--- [13] Self-purchase abuse block ---"
+if [[ -n "${USER_LISTING_ID}" && -n "${SELLER_TOKEN}" ]]; then
+  SELF_BUY=$(curl -sS --max-time 5 -w "\n%{http_code}" -X POST "${API_BASE}/api/v1/points-market/orders" \
+    -H "Authorization: Bearer ${SELLER_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{\"listing_id\":\"${USER_LISTING_ID}\",\"idempotency_key\":\"c2c-smoke-self-buy-$(date +%s)\"}") || true
+  SELF_BUY_HTTP=$(echo "${SELF_BUY}" | tail -1)
+  SELF_BUY_BODY=$(echo "${SELF_BUY}" | sed '$d')
+  SELF_BUY_CODE=$(echo "${SELF_BUY_BODY}" | quiet_json "error.code")
+  [[ "${SELF_BUY_HTTP}" == "400" && "${SELF_BUY_CODE}" == "COMMERCE_CANNOT_BUY_OWN_ITEM" ]] \
+    && pass "self-purchase blocked (COMMERCE_CANNOT_BUY_OWN_ITEM)" \
+    || fail "self-purchase block (http=${SELF_BUY_HTTP}, code=${SELF_BUY_CODE})"
+else
+  skip "self-purchase: missing seller listing or token"
+fi
+
+echo ""
+echo "--- [14] Rate limits (listing burst) ---"
+RATE_SELLER_EMAIL="c2c-smoke-rate@test.livemask"
+pg_exec -c "DELETE FROM users WHERE email='${RATE_SELLER_EMAIL}'" >/dev/null || true
+RATE_REG=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/auth/register" \
+  -H "Content-Type: application/json" \
+  -d "{\"request_id\":\"c2c-smoke-rate\",\"email\":\"${RATE_SELLER_EMAIL}\",\"password\":\"${SELLER_PASS}\",\"display_name\":\"C2C Rate\",\"client_type\":\"app\"}") || true
+RATE_SELLER_ID=$(echo "${RATE_REG}" | quiet_json "user.user_id")
+RATE_SELLER_TOKEN=$(echo "${RATE_REG}" | quiet_json "access_token")
+if [[ -n "${RATE_SELLER_ID}" ]]; then
+  pg_exec -c "INSERT INTO user_roles (user_id, role_key, reason) VALUES ('${RATE_SELLER_ID}', 'sponsor_ambassador', 'c2c-smoke') ON CONFLICT DO NOTHING" >/dev/null
+  RATE_LOGIN=$(curl -sS --max-time 5 -X POST "${API_BASE}/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"request_id\":\"c2c-smoke-rate-login\",\"email\":\"${RATE_SELLER_EMAIL}\",\"password\":\"${SELLER_PASS}\",\"client_type\":\"app\"}") || true
+  RATE_SELLER_TOKEN=$(echo "${RATE_LOGIN}" | quiet_json "access_token")
+fi
+if [[ -n "${RATE_SELLER_TOKEN}" ]]; then
+  pg_exec -c "
+    UPDATE product_config_versions
+    SET config = config || '{\"listing_rate_limit_per_minute\":1,\"order_rate_limit_per_minute\":20,\"dispute_rate_limit_per_minute\":5}'::jsonb
+    WHERE family_id = (SELECT id FROM product_config_families WHERE key='points-market')
+      AND status='published'
+  " >/dev/null || true
+
+  RL1=$(curl -sS --max-time 5 -w "\n%{http_code}" -X POST "${API_BASE}/api/v1/points-market/listings" \
+    -H "Authorization: Bearer ${RATE_SELLER_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{"title":"RL Smoke 1","points_price":600,"inventory_total":1}') || true
+  RL1_HTTP=$(echo "${RL1}" | tail -1)
+  RL2=$(curl -sS --max-time 5 -w "\n%{http_code}" -X POST "${API_BASE}/api/v1/points-market/listings" \
+    -H "Authorization: Bearer ${RATE_SELLER_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{"title":"RL Smoke 2","points_price":601,"inventory_total":1}') || true
+  RL2_HTTP=$(echo "${RL2}" | tail -1)
+  RL2_BODY=$(echo "${RL2}" | sed '$d')
+  RL2_CODE=$(echo "${RL2_BODY}" | quiet_json "error.code")
+  [[ "${RL1_HTTP}" == "200" || "${RL1_HTTP}" == "201" ]] && pass "rate-limit first listing ok (${RL1_HTTP})" || fail "rate-limit first listing (http=${RL1_HTTP})"
+  [[ "${RL2_HTTP}" == "429" && "${RL2_CODE}" == "COMMERCE_RATE_LIMITED" ]] \
+    && pass "rate-limit second listing 429 COMMERCE_RATE_LIMITED" \
+    || fail "rate-limit burst (http=${RL2_HTTP}, code=${RL2_CODE})"
+
+  pg_exec -c "
+    UPDATE product_config_versions
+    SET config = config - 'listing_rate_limit_per_minute'
+    WHERE family_id = (SELECT id FROM product_config_families WHERE key='points-market')
+      AND status='published'
+  " >/dev/null || true
+else
+  skip "rate limits: could not create rate-test seller"
+fi
+
+echo ""
+echo "--- [15] Admin manual points adjust ---"
+if [[ -n "${ADMIN_TOKEN}" && -n "${BUYER_ID}" ]]; then
+  ADJ_IDEM="c2c-smoke-admin-adjust-$(date +%s)"
+  ADJ_RESP=$(curl -sS --max-time 5 -X POST "${API_BASE}/admin/api/v1/points/adjust" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{\"user_id\":\"${BUYER_ID}\",\"direction\":\"credit\",\"amount\":250,\"reason\":\"c2c-smoke-adjust\",\"idempotency_key\":\"${ADJ_IDEM}\"}") || true
+  ADJ_OK=$(echo "${ADJ_RESP}" | quiet_json "ok")
+  ADJ_BAL=$(echo "${ADJ_RESP}" | quiet_json "balance_after")
+  [[ "${ADJ_OK}" == "True" || "${ADJ_OK}" == "true" ]] && pass "admin points adjust ok (balance_after=${ADJ_BAL})" || fail "admin points adjust (${ADJ_RESP})"
+
+  ADJ_SOURCE="admin:${ADMIN_USER_ID}:${ADJ_IDEM}"
+  ADJ_LEDGER=$(pg_exec -c "SELECT COUNT(*) FROM points_ledger WHERE user_id='${BUYER_ID}' AND source_type='manual_adjustment' AND source_id='${ADJ_SOURCE}'")
+  [[ "${ADJ_LEDGER}" == "1" ]] && pass "admin adjust ledger row" || fail "admin adjust ledger (count=${ADJ_LEDGER})"
+else
+  skip "admin points adjust: missing admin token or buyer id"
 fi
 
 echo ""
