@@ -123,6 +123,7 @@ services:
     restart: unless-stopped
     ports:
       - "${LIVEMASK_NODEAGENT_PORT:-19090}:9100"
+      - "${SINGBOX_PUBLIC_ENDPOINT_PORT:-8443}:${SINGBOX_LISTEN_PORT:-8443}/udp"
     environment:
       BACKEND_BASE_URL: "http://backend:8080"
       BACKEND_CONFIG_URL: "http://backend:8080/internal/agent/config"
