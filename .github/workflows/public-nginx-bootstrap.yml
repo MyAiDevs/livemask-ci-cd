@@ -1,0 +1,44 @@
+name: Public Nginx Bootstrap
+
+# One-time / on-demand TLS reverse proxy on the self-hosted staging runner.
+# Do NOT scp compose or database dumps from a laptop — runner owns runtime state.
+
+on:
+  workflow_dispatch:
+    inputs:
+      primary_domain:
+        description: Primary domain (apex + api/www/job subdomains)
+        required: true
+        default: livemask-vpn.com
+      mirror_domains:
+        description: Comma-separated mirror apex domains (optional DNS required for certbot)
+        required: false
+        default: vpn-mirrors.xyz,vpn-mirrors.cfd
+      certbot_email:
+        description: Let's Encrypt contact email
+        required: true
+        default: admin@livemask-vpn.com
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on:
+      group: livemask-staging
+      labels: [self-hosted, Linux, livemask, docker, staging]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nginx and issue certificates on runner host
+        env:
+          PRIMARY_DOMAIN: ${{ inputs.primary_domain }}
+          MIRROR_DOMAINS: ${{ inputs.mirror_domains }}
+          CERTBOT_EMAIL: ${{ inputs.certbot_email }}
+        run: bash scripts/setup-public-nginx.sh
+
+      - name: Verify HTTPS API health
+        run: |
+          curl -fsS "https://api.${PRIMARY_DOMAIN}/api/v1/health"
+        env:
+          PRIMARY_DOMAIN: ${{ inputs.primary_domain }}
