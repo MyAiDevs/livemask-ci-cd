@@ -275,6 +275,12 @@ ADMIN_SENTRY_SETTINGS_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}
 case "${ADMIN_SENTRY_SETTINGS_HTTP}" in
   200)
     pass "Admin Sentry settings: HTTP 200"
+    SERVER_BASE_URL=$(echo "${ADMIN_SENTRY_SETTINGS_RESP}" | quiet_json "config.server_base_url")
+    if [[ -n "${SERVER_BASE_URL}" ]]; then
+      pass "Admin Sentry server_base_url present (${SERVER_BASE_URL})"
+    else
+      fail "Admin Sentry settings missing config.server_base_url"
+    fi
     security_check "Admin Sentry settings" "${ADMIN_SENTRY_SETTINGS_RESP}" || true
     ;;
   404)
@@ -435,6 +441,37 @@ else:
     ;;
   *)
     skip "Sentry app settings API: HTTP ${SENTRY_APP_HTTP}"
+    ;;
+esac
+
+# ---------------------------------------------------------------------------
+# [11] GET /admin/api/v1/observability/sentry/issues
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- [11] GET /admin/api/v1/observability/sentry/issues ---"
+SENTRY_ISSUES_RESP=$(curl -sS --max-time 10 \
+  "${API_BASE}/admin/api/v1/observability/sentry/issues" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+SENTRY_ISSUES_HTTP=$(curl -sS --max-time 10 -o /dev/null -w "%{http_code}" \
+  "${API_BASE}/admin/api/v1/observability/sentry/issues" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+
+case "${SENTRY_ISSUES_HTTP}" in
+  200)
+    pass "Sentry issues API: HTTP 200"
+    ISSUES_SOURCE=$(echo "${SENTRY_ISSUES_RESP}" | quiet_json "source")
+    if [[ "${ISSUES_SOURCE}" == "sentry_api" || "${ISSUES_SOURCE}" == "webhook" ]]; then
+      pass "Sentry issues source=${ISSUES_SOURCE}"
+    else
+      skip "Sentry issues source missing (got: ${ISSUES_SOURCE})"
+    fi
+    security_check "Sentry issues" "${SENTRY_ISSUES_RESP}" "auth_token,webhook_secret" || true
+    ;;
+  404)
+    skip "Sentry issues API: HTTP 404"
+    ;;
+  *)
+    skip "Sentry issues API: HTTP ${SENTRY_ISSUES_HTTP}"
     ;;
 esac
 

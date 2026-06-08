@@ -661,8 +661,22 @@ else
   if [[ "${REAL_CLIENT_PROTO}" != "singbox" ]]; then echo "  FAIL: client protocol=${REAL_CLIENT_PROTO}"; real_ok=false; fi
   if [[ -z "${REAL_EXPIRES}" ]]; then echo "  FAIL: expires_at missing"; real_ok=false; fi
   if [[ -n "${REAL_WARNINGS}" ]] && [[ "${REAL_WARNINGS}" != "None" ]] && [[ "${REAL_WARNINGS}" != "[]" ]]; then echo "  INFO: warnings present: ${REAL_WARNINGS:0:100}"; fi
+  REAL_ROUTING_MODE=$(echo "${REAL_SESSION_RESP}" | quiet_json "connect_config.routing.mode")
+  REAL_GEOSITE_CN=$(echo "${REAL_SESSION_RESP}" | python3 -c "
+import sys,json
+sets=json.load(sys.stdin).get('connect_config',{}).get('routing',{}).get('geosite_rule_sets',[])
+print('yes' if 'geosite-cn' in sets else 'no')
+" 2>/dev/null || echo "no")
+  if [[ "${REAL_ROUTING_MODE}" != "smart" ]]; then
+    echo "  FAIL: routing.mode=${REAL_ROUTING_MODE} (expected smart)"
+    real_ok=false
+  fi
+  if [[ "${REAL_GEOSITE_CN}" != "yes" ]]; then
+    echo "  FAIL: routing.geosite_rule_sets missing geosite-cn"
+    real_ok=false
+  fi
   if [[ "${real_ok}" == "true" ]]; then
-    pass "[TASK-CICD-VPN-CONFIG-001] Real config session: is_skeleton=false endpoint=${REAL_ENDPOINT}:${REAL_PORT} transport=${REAL_TRANSPORT}"
+    pass "[TASK-CICD-VPN-CONFIG-001] Real config session: is_skeleton=false endpoint=${REAL_ENDPOINT}:${REAL_PORT} transport=${REAL_TRANSPORT} routing=smart"
   else
     fail "[TASK-CICD-VPN-CONFIG-001] Real config session checks failed"
     echo "  Response: $(echo ${REAL_SESSION_RESP} | head -c 500)"

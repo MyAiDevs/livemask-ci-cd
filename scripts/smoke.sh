@@ -990,6 +990,18 @@ else
 fi
 
 echo ""
+echo "=== Smoke: App Runtime Engine Apply (TASK-CICD-APP-RUNTIME-ENGINE-APPLY-SMOKE-001) ==="
+if bash "${SCRIPT_DIR}/app-runtime-engine-apply-smoke.sh" 2>&1; then
+  echo "App runtime engine apply smoke PASSED."
+else
+  arg_rc=$?
+  echo ""
+  echo "=== App Runtime Engine Apply Smoke FAILED ==="
+  docker compose -f "${COMPOSE_FILE}" logs backend --tail=100 2>/dev/null || true
+  exit ${arg_rc}
+fi
+
+echo ""
 # ── Protocol Parity Smoke (TASK-CICD-PROTOCOL-PARITY-SMOKE-001) ─────────
 echo ""
 echo "=== Smoke: Protocol Parity (TASK-CICD-PROTOCOL-PARITY-SMOKE-001) ==="
