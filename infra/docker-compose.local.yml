@@ -144,6 +144,8 @@ services:
       GEOIP_CHECK_INTERVAL_SEC: "${GEOIP_CHECK_INTERVAL_SEC:-300}"
       SINGBOX_REMOTE_UPDATE_ENABLED: "${SINGBOX_REMOTE_UPDATE_ENABLED:-true}"
       SINGBOX_COMPONENT_DIR: "${SINGBOX_COMPONENT_DIR:-/workspace/.state/singbox-components}"
+      SINGBOX_CACHE_BIN: "${SINGBOX_CACHE_BIN:-/workspace/.singbox-cache/sing-box}"
+      SINGBOX_RUNTIME_CACHE_BIN: "${SINGBOX_RUNTIME_CACHE_BIN:-/workspace/.state/sing-box}"
       SINGBOX_MANIFEST_PLATFORM: "${SINGBOX_MANIFEST_PLATFORM:-linux-amd64-musl}"
       SINGBOX_MANIFEST_ARCH: "${SINGBOX_MANIFEST_ARCH:-amd64}"
       SINGBOX_MANIFEST_POLL_INTERVAL_SEC: "${SINGBOX_MANIFEST_POLL_INTERVAL_SEC:-300}"
@@ -168,6 +170,7 @@ services:
       - "${SINGBOX_PUBLIC_ENDPOINT_PORT:-8443}:${SINGBOX_LISTEN_PORT:-8443}/udp"
     volumes:
       - ${LIVEMASK_WORKSPACE_ROOT:-/Users/sammytan/Developer/LiveMask}/livemask-nodeagent:/workspace/livemask-nodeagent
+      - ${LIVEMASK_WORKSPACE_ROOT:-/Users/sammytan/Developer/LiveMask}/livemask-ci-cd/infra/_build_deps/nodeagent/bin:/workspace/.singbox-cache:ro
       - livemask-local-nodeagent-state:/workspace/.state
       - livemask-local-go-cache:/workspace/.cache
     depends_on:
