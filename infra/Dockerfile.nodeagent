@@ -14,7 +14,14 @@ RUN if [ ! -f /src/go.mod ]; then \
 
 WORKDIR /src
 RUN go mod download
-RUN CGO_ENABLED=0 go build -o /out/nodeagent ./cmd/nodeagent
+ARG NODEAGENT_USE_GARBLE=0
+ARG NODEAGENT_VERSION=dev
+ENV VERSION="${NODEAGENT_VERSION}" \
+    NODEAGENT_USE_GARBLE="${NODEAGENT_USE_GARBLE}" \
+    OUT_DIR=/out
+RUN chmod +x scripts/build-protected-release.sh \
+    && bash scripts/build-protected-release.sh \
+    && cp "/out/nodeagent_${NODEAGENT_VERSION}_linux_amd64" /out/nodeagent
 
 # stage 2: runtime
 FROM alpine:3.20
