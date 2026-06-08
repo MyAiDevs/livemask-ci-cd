@@ -73,6 +73,10 @@ services:
       JOB_SERVICE_TIMEOUT_SEC: "${JOB_SERVICE_TIMEOUT_SEC:-30}"
       NODEAGENT_CONTROL_URL: "${NODEAGENT_CONTROL_URL:-http://nodeagent:9100}"
       NODEAGENT_CONTROL_NODE_NAME: "${NODEAGENT_CONTROL_NODE_NAME:-local-nodeagent}"
+      # Sponsor install bundle rendering (P2)
+      PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:-http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT:-18080}}"
+      NODEAGENT_IMAGE: "${NODEAGENT_IMAGE:-ghcr.io/myaidevs/livemask-nodeagent:dev}"
+      NODEAGENT_DEFAULT_VERSION: "${NODEAGENT_DEFAULT_VERSION:-${NODEAGENT_VERSION:-dev}}"
     depends_on:
       postgres:
         condition: service_healthy
