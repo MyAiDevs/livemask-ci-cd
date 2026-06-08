@@ -23,5 +23,6 @@ WORKDIR /app
 COPY --from=builder /out/nodeagent .
 COPY _build_deps/nodeagent/scripts/install-singbox.sh /usr/local/bin/install-singbox.sh
 RUN sh /usr/local/bin/install-singbox.sh /usr/local/bin
-EXPOSE 9100
+EXPOSE 9100/tcp
+EXPOSE 8443/udp
 CMD ["./nodeagent"]

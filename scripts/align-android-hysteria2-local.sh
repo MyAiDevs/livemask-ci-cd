@@ -158,10 +158,18 @@ else
   echo "  PASS: Backend issues hysteria2 connect_config"
 fi
 
+echo "--- [8] Recreate nodeagent with published HY2 UDP ${HY2_PORT} ---"
+bash "${ROOT}/scripts/forward-hy2-udp-docker.sh" stop 2>/dev/null || true
+docker compose -f "${COMPOSE_FILE}" --profile nodeagent up -d --force-recreate nodeagent
+sleep 3
+docker port livemask-local-nodeagent-1 "${HY2_PORT}/udp" 2>/dev/null || echo "  WARN: ${HY2_PORT}/udp not published — check docker-compose.local.yml"
+
 echo ""
 echo "== Done. Android APK rebuild/install =="
 echo "  cd livemask-app"
 echo "  flutter run -d <device-id> --dart-define=API_BASE_URL=http://${LAN_HOST}:${BACKEND_HTTP_PORT}"
 echo ""
-echo "After connect, expect UI 'connected' (not shell ready) and NodeAgent logs:"
-echo "  docker logs livemask-local-nodeagent-1 2>&1 | grep -E 'sessionauth|traffic.*client'"
+echo "After connect, expect UI 'connected' and NodeAgent traffic (connections>0):"
+echo "  docker logs livemask-local-nodeagent-1 2>&1 | grep -E 'sessionauth|traffic'"
+echo "HY2 UDP is published by Docker (${HY2_PORT}/udp). Verify:"
+echo "  docker port livemask-local-nodeagent-1 ${HY2_PORT}/udp"
