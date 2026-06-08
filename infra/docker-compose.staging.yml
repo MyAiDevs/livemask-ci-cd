@@ -49,6 +49,7 @@ services:
       CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-http://127.0.0.1:${LIVEMASK_ADMIN_PORT:-3001},http://127.0.0.1:${LIVEMASK_WEBSITE_PORT:-3002},http://localhost:${LIVEMASK_ADMIN_PORT:-3001},http://localhost:${LIVEMASK_WEBSITE_PORT:-3002}}"
       # Dev-only seed users (optional; never set in production)
       DEV_SEED_USERS: "${DEV_SEED_USERS:-true}"
+      DEV_SEED_CONTENT: "${DEV_SEED_CONTENT:-true}"
       DEV_DEFAULT_PASSWORD: "${DEV_DEFAULT_PASSWORD:-DevPass123!}"
       DEV_ADMIN_EMAIL: "${DEV_ADMIN_EMAIL:-admin@livemask.dev}"
       DEV_ADMIN_PASSWORD: "${DEV_ADMIN_PASSWORD:-AdminPass123!}"
@@ -62,6 +63,9 @@ services:
       DEV_USER_PASSWORD: "${DEV_USER_PASSWORD:-UserPass123!}"
       # GeoIP credential encryption (dev-only; production uses a real key)
       GEOIP_CREDENTIAL_ENCRYPTION_KEY: "${GEOIP_CREDENTIAL_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      GEOIP_UPDATE_ENABLED: "${GEOIP_UPDATE_ENABLED:-true}"
+      GEOIP_UPDATE_INTERVAL: "${GEOIP_UPDATE_INTERVAL:-24h}"
+      GEOIP_DATA_DIR: "${GEOIP_DATA_DIR:-data/geoip}"
       # Job Service admin gateway (dev/staging runtime)
       JOB_SERVICE_ENABLED: "${JOB_SERVICE_ENABLED:-true}"
       JOB_SERVICE_INTERNAL_URL: "${JOB_SERVICE_INTERNAL_URL:-http://job-service:19191}"
@@ -148,6 +152,9 @@ services:
       NODEAGENT_TLS_CERT_PATH: "${NODEAGENT_TLS_CERT_PATH:-}"
       NODEAGENT_TLS_KEY_PATH: "${NODEAGENT_TLS_KEY_PATH:-}"
       NODE_PUBLIC_HOST_V6: "${NODE_PUBLIC_HOST_V6:-}"
+      # Dev HY2 server auth (required when protocol template has no secret_refs)
+      HYSTERIA2_AUTH: "${HYSTERIA2_AUTH:-}"
+      NODEAGENT_HYSTERIA2_AUTH: "${NODEAGENT_HYSTERIA2_AUTH:-${HYSTERIA2_AUTH:-}}"
     volumes:
       - livemask-staging-nodeagent:/var/lib/livemask-nodeagent
       - ${HY2_TLS_CERT_DIR:-/etc/letsencrypt/live/livemask-vpn.com}:/etc/livemask/hy2-tls:ro

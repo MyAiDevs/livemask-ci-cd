@@ -37,7 +37,9 @@ jobs:
       SINGBOX_PUBLIC_ENDPOINT_PORT: "8443"
       NODEAGENT_TLS_CERT_PATH: "/etc/livemask/hy2-tls/fullchain.pem"
       NODEAGENT_TLS_KEY_PATH: "/etc/livemask/hy2-tls/privkey.pem"
-      HY2_TLS_CERT_DIR: "/etc/letsencrypt/live/livemask-vpn.com"
+      HY2_TLS_CERT_DIR: "/etc/letsencrypt/live/api.livemask-vpn.com"
+      GEOIP_UPDATE_ENABLED: "true"
+      HYSTERIA2_AUTH: "DevHy2Pass-change-me"
     runs-on:
       group: livemask-staging
       labels: [self-hosted, Linux, livemask, docker, staging]
