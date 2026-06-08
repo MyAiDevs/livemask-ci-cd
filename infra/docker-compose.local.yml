@@ -163,7 +163,7 @@ services:
       PATH: /usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     ports:
       - "${LIVEMASK_NODEAGENT_PORT:-19090}:9100"
-      - "${SINGBOX_LISTEN_PORT:-8443}:8443/udp"
+      - "${SINGBOX_PUBLIC_ENDPOINT_PORT:-8443}:${SINGBOX_LISTEN_PORT:-8443}/udp"
     volumes:
       - ${LIVEMASK_WORKSPACE_ROOT:-/Users/sammytan/Developer/LiveMask}/livemask-nodeagent:/workspace/livemask-nodeagent
       - livemask-local-nodeagent-state:/workspace/.state
