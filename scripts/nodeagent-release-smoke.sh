@@ -17,6 +17,7 @@ set -euo pipefail
 #  [10] Rollout pause/resume
 #  [11] Revoked release 不被 check 选中
 #  [12] Secret leak scan
+#  [13] P4 per-node release pin + cohort check (nodeagent APIs)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -715,6 +716,91 @@ fi
 pass "Secret leak scan completed (0 new leaks detected)"
 
 # ──────────────────────────────────────────────────────────────────────────────
+# [13] P4 per-node release assignment + check resolution
+# ──────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "--- [13] P4 Release Assignment Pin ---"
+P4_VERSION="p4-pin-${TIMESTAMP}"
+P4_SHA="1111111111111111111111111111111111111111111111111111111111111111"
+
+if [[ -n "${ADMIN_TOKEN}" && -n "${NODE_ID}" && -n "${NODE_SECRET_HASH}" ]]; then
+  CREATE_NA_RAW=$(curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
+    "${API_BASE}/admin/api/v1/nodeagent/releases" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -d "{\"version\":\"${P4_VERSION}\",\"platform\":\"linux\",\"arch\":\"amd64\",\"channel\":\"canary\",\"artifact_url\":\"https://example.com/${P4_VERSION}.tar.gz\",\"sha256\":\"${P4_SHA}\",\"min_config_schema\":\"1.0\",\"max_config_schema\":\"9.9\"}") || true
+  CREATE_NA_HTTP=$(echo "${CREATE_NA_RAW}" | tail -1)
+  CREATE_NA_BODY=$(echo "${CREATE_NA_RAW}" | sed '$d')
+  NA_RELEASE_ID=$(echo "${CREATE_NA_BODY}" | quiet_json "id")
+
+  if [[ "${CREATE_NA_HTTP}" == "201" || "${CREATE_NA_HTTP}" == "200" ]]; then
+    pass "P4 nodeagent release create: HTTP ${CREATE_NA_HTTP}"
+    PUB_RAW=$(curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
+      "${API_BASE}/admin/api/v1/nodeagent/releases/${NA_RELEASE_ID}/publish" \
+      -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+    PUB_HTTP=$(echo "${PUB_RAW}" | tail -1)
+    if [[ "${PUB_HTTP}" == "200" || "${PUB_HTTP}" == "204" ]]; then
+      pass "P4 nodeagent release publish: HTTP ${PUB_HTTP}"
+    else
+      skip "P4 publish: HTTP ${PUB_HTTP}"
+    fi
+
+    PIN_RAW=$(curl -sS -w "\n%{http_code}" --max-time 5 -X PUT \
+      "${API_BASE}/admin/api/v1/nodes/${NODE_ID}/release-assignment" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+      -d "{\"channel\":\"canary\",\"target_version\":\"${P4_VERSION}\",\"rollout_id\":\"p4-smoke-${TIMESTAMP}\"}") || true
+    PIN_HTTP=$(echo "${PIN_RAW}" | tail -1)
+    PIN_BODY=$(echo "${PIN_RAW}" | sed '$d')
+    if [[ "${PIN_HTTP}" == "200" ]]; then
+      PIN_VER=$(echo "${PIN_BODY}" | quiet_json "assignment.target_version")
+      if [[ "${PIN_VER}" == "${P4_VERSION}" ]]; then
+        pass "P4 admin pin: target_version=${PIN_VER}"
+      else
+        fail "P4 admin pin: expected ${P4_VERSION}, got ${PIN_VER}"
+      fi
+    else
+      skip "P4 admin pin: HTTP ${PIN_HTTP}"
+    fi
+
+    P4_CHECK_BODY="${SMOKE_TMPDIR}/p4_check.json"
+    P4_CHECK_HTTP=$(do_hmac_get_status_body "${P4_CHECK_BODY}" \
+      "${API_BASE}/internal/agent/release/check?agent_version=0.0.0&platform=linux&arch=amd64" \
+      "${NODE_ID}" "${NODE_SECRET_HASH}")
+    if [[ "${P4_CHECK_HTTP}" == "200" ]]; then
+      P4_TARGET=$(cat "${P4_CHECK_BODY}" | quiet_json "target_version")
+      P4_REC=$(cat "${P4_CHECK_BODY}" | quiet_json "upgrade_recommended")
+      if [[ "${P4_TARGET}" == "${P4_VERSION}" ]]; then
+        pass "P4 check resolves pin: target=${P4_TARGET} recommended=${P4_REC}"
+      else
+        fail "P4 check expected target ${P4_VERSION}, got ${P4_TARGET}"
+      fi
+      security_check "P4 release check" "$(cat "${P4_CHECK_BODY}")" || true
+    else
+      skip "P4 release check: HTTP ${P4_CHECK_HTTP}"
+    fi
+
+    CLEAR_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" -X DELETE \
+      "${API_BASE}/admin/api/v1/nodes/${NODE_ID}/release-assignment" \
+      -H "Authorization: Bearer ${ADMIN_TOKEN}") || true
+    if [[ "${CLEAR_HTTP}" == "200" ]]; then
+      pass "P4 clear pin: HTTP 200"
+    else
+      skip "P4 clear pin: HTTP ${CLEAR_HTTP}"
+    fi
+
+    if [[ -n "${NA_RELEASE_ID}" ]]; then
+      pg_exec -c "DELETE FROM nodeagent_releases WHERE id='${NA_RELEASE_ID}'" 2>/dev/null || true
+    fi
+    pg_exec -c "UPDATE nodeagent_release_assignments SET status='rolled_back' WHERE node_id='${NODE_ID}'" 2>/dev/null || true
+  else
+    skip "P4 nodeagent release create: HTTP ${CREATE_NA_HTTP}"
+  fi
+else
+  skip "P4 release assignment: missing admin token or node identity"
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Cleanup all test data
 # ──────────────────────────────────────────────────────────────────────────────
 echo ""
@@ -762,4 +848,4 @@ fi
 echo "[TASK-CICD-NODEAGENT-RELEASE-001] NodeAgent release smoke PASSED."
 echo "Covers: Backend health, Admin login, Release CRUD, NodeAgent HMAC check,"
 echo "  Wrong HMAC rejection, Release events, Rollout pause/resume,"
-echo "  Revoked release exclusion, Secret leak scan"
+echo "  Revoked release exclusion, Secret leak scan, P4 per-node pin"
