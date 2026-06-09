@@ -62,6 +62,7 @@ SMOKE_SCRIPTS=(
   node
   billing
   connect
+  vpn-protocol-matrix
   geoip
   geoip-credentials
   growth-revenue
