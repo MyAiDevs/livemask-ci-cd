@@ -439,6 +439,16 @@ else
 fi
 
 echo ""
+# ── Protocol Secret Rotation HA Smoke (TASK-CICD-PROTOCOL-SECRET-ROTATION-HA-SMOKE-001) ──
+echo ""
+echo "=== Smoke: Protocol Secret Rotation HA (TASK-CICD-PROTOCOL-SECRET-ROTATION-HA-SMOKE-001) ==="
+if bash "${SCRIPT_DIR}/protocol-secret-rotation-ha-smoke.sh" 2>&1; then
+  echo "Protocol secret rotation HA smoke PASSED."
+else
+  echo "Protocol secret rotation HA smoke FAILED (see SKIP matrix in script output)."
+fi
+
+echo ""
 # ── Protocol & Endpoint Capability Smoke (TASK-CICD-PROTOCOL-CAPABILITY-001) ──
 echo ""
 echo "=== Smoke: Protocol & Endpoint Capability (TASK-CICD-PROTOCOL-CAPABILITY-001) ==="
