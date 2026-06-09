@@ -64,6 +64,7 @@ SMOKE_SCRIPTS=(
   connect
   vpn-protocol-matrix
   app-libbox-config
+  app-libbox-tunnel-runtime
   geoip
   geoip-credentials
   growth-revenue
