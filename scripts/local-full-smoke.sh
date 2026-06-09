@@ -65,6 +65,8 @@ SMOKE_SCRIPTS=(
   vpn-protocol-matrix
   app-libbox-config
   app-libbox-tunnel-runtime
+  app-android-libbox-runtime
+  vpn-protocol-e2e-acceptance
   geoip
   geoip-credentials
   growth-revenue

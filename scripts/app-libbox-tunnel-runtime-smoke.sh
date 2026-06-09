@@ -28,4 +28,7 @@ flutter test test/app_libbox_tunnel_runtime_test.dart
 echo "--- [2] singbox_config_builder_test.dart ---"
 flutter test test/singbox_config_builder_test.dart
 
+echo "--- [3] app_android_tunnel_runtime_test.dart ---"
+flutter test test/app_android_tunnel_runtime_test.dart
+
 echo "[TASK-CICD-APP-LIBBOX-TUNNEL-RUNTIME-SMOKE-001] App Libbox tunnel runtime smoke PASSED."
