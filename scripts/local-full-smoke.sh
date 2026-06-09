@@ -63,6 +63,7 @@ SMOKE_SCRIPTS=(
   billing
   connect
   vpn-protocol-matrix
+  app-libbox-config
   geoip
   geoip-credentials
   growth-revenue
