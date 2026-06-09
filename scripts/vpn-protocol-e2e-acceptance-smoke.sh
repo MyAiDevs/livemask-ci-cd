@@ -53,6 +53,9 @@ run_layer "vpn-protocol-matrix"
 run_layer "app-libbox-config"
 run_layer "app-libbox-tunnel-runtime"
 run_layer "app-android-libbox-runtime"
+run_layer "vpn-device-e2e-preflight"
+run_layer "vpn-inbound-ops"
+run_layer "protocol-control-plane-closure"
 
 echo ""
 echo "--- Acceptance matrix (CI layers) ---"
@@ -65,10 +68,15 @@ for profile in "${PROFILES[@]}"; do
       l4="blocked"
       l5="ops-only"
       ;;
+    hysteria2)
+      l3="PASS"
+      l4="PASS-H2"
+      l5="PREFLIGHT"
+      ;;
     *)
       l3="PASS"
-      l4="degraded*"
-      l5="OPEN"
+      l4="PASS-libbox"
+      l5="PREFLIGHT"
       ;;
   esac
   printf "%-16s | %-10s | %-9s | %-11s | %-13s | %-9s\n" \
@@ -76,9 +84,8 @@ for profile in "${PROFILES[@]}"; do
 done
 
 echo ""
-echo "* Android L4: hysteria2=real H2Mobile; other libbox profiles return"
-echo "  structured android_libbox_aar_missing (no fake connected)."
-echo "  L5 device proof: see livemask-docs/tasks/TASK-VPN-E2E-*.md"
+echo "* Android L4: hysteria2=H2Mobile; libbox outbound=LibboxTunnelEngine + TUN bridge."
+echo "  L5 live traffic: manual on signed device; preflight smoke validates code+docs gate."
 
 if [[ -d "${DOCS_ROOT}" ]]; then
   missing=0

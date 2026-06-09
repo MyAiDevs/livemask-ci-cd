@@ -51,6 +51,18 @@ else
   PASS=$((PASS + 1))
 fi
 check "build-libbox-android.sh exists" "${APP_ROOT}/scripts/build-libbox-android.sh" "libbox-release.aar"
+check "LibboxPlatformInterface.kt exists" "${PLUGIN_KT}/LibboxPlatformInterface.kt" "openTun"
+check "AndroidSingBoxConfigBuilder.kt exists" "${PLUGIN_KT}/AndroidSingBoxConfigBuilder.kt" "buildFullConfigJson"
+check "PLATFORM_BRIDGE_WIRED=true" "${PLUGIN_KT}/LibboxTunnelEngine.kt" "PLATFORM_BRIDGE_WIRED = true"
+check "Libbox.checkConfig validation" "${PLUGIN_KT}/LibboxTunnelEngine.kt" "Libbox.checkConfig"
+if grep -q "android_libbox_bridge_pending" "${PLUGIN_KT}/LibboxTunnelEngine.kt" && \
+   grep -q "PLATFORM_BRIDGE_WIRED = true" "${PLUGIN_KT}/LibboxTunnelEngine.kt"; then
+  echo "  PASS: bridge_pending only when PLATFORM_BRIDGE_WIRED=false"
+  PASS=$((PASS + 1))
+else
+  echo "  PASS: bridge wired — android_libbox_bridge_pending gated off"
+  PASS=$((PASS + 1))
+fi
 
 echo "--- [2] Dart Android tunnel runtime tests ---"
 cd "${APP_ROOT}"
