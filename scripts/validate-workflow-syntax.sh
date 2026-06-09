@@ -37,8 +37,23 @@ workflow_contracts = {
   },
   ".github/workflows/dev-runtime-deploy.yml" => {
     "name" => "Dev Runtime Deploy",
-    "on" => ["push", "workflow_dispatch"],
+    "on" => ["push", "workflow_dispatch", "repository_dispatch"],
     "jobs" => ["deploy", "notify-lark"],
+  },
+  ".github/workflows/reusable-trigger-dev-runtime-deploy.yml" => {
+    "name" => "Reusable Trigger Dev Runtime Deploy",
+    "on" => ["workflow_call"],
+    "jobs" => ["dispatch"],
+  },
+  ".github/workflows/public-nginx-bootstrap.yml" => {
+    "name" => "Public Nginx Bootstrap",
+    "on" => ["workflow_dispatch"],
+    "jobs" => ["bootstrap"],
+  },
+  ".github/workflows/webhook-auto-deploy.yml" => {
+    "name" => "Auto-Deploy Webhook Server",
+    "on" => ["push", "workflow_dispatch"],
+    "jobs" => ["deploy"],
   },
   ".github/workflows/auto-task-assignment.yml" => {
     "name" => "Auto Task Assignment",

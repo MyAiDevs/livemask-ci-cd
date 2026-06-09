@@ -261,6 +261,19 @@ refresh_local_dev_after_push() {
   git_in_repo pull --ff-only origin dev
 }
 
+maybe_sync_local_runtime() {
+  local sync_script="${LIVEMASK_WORKSPACE_ROOT}/livemask-ci-cd/scripts/local-dev.sh"
+  if [[ ! -x "${sync_script}" ]]; then
+    return 0
+  fi
+  info "best-effort local runtime sync for ${repo_name}"
+  if bash "${sync_script}" sync --changed-repo "${repo}" --auto --no-pull; then
+    info "local runtime sync completed for ${repo_name}"
+  else
+    info "local runtime sync skipped or unavailable (non-fatal)"
+  fi
+}
+
 if [[ "${#validation_cmds[@]}" -eq 0 ]]; then
   while IFS= read -r cmd; do
     validation_cmds+=("${cmd}")
@@ -357,6 +370,7 @@ dev_commit="$(git_in_repo rev-parse --short HEAD)"
 info "push dev to origin/dev"
 git_in_repo push origin dev
 refresh_local_dev_after_push
+maybe_sync_local_runtime
 remote_dev="$(git_in_repo ls-remote origin refs/heads/dev | awk '{print substr($1,1,7)}')"
 local_dev="$(git_in_repo rev-parse --short HEAD)"
 
