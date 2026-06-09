@@ -76,6 +76,7 @@ SMOKE_SCRIPTS=(
   notification-settings
   payment-settings
   app-release
+  artifact-oss
   sentry-config
   observability
   i18n
