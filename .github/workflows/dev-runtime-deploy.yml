@@ -5,6 +5,9 @@ on:
     branches:
       - dev
   workflow_dispatch:
+  repository_dispatch:
+    types:
+      - dev-runtime-deploy
 
 permissions:
   actions: read
@@ -47,6 +50,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
+
+      - name: Record deploy trigger
+        run: |
+          echo "event=${{ github.event_name }}"
+          echo "source_repo=${{ github.event.client_payload.source_repo || 'livemask-ci-cd' }}"
+          echo "source_sha=${{ github.event.client_payload.sha || github.sha }}"
+          echo "source_ref=${{ github.event.client_payload.ref || 'dev' }}"
 
       - name: Checkout backend source into build context
         uses: actions/checkout@v4
