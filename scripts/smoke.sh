@@ -449,6 +449,21 @@ else
 fi
 
 echo ""
+# ── Protocol Secret Rotation Staging Seed (TASK-CICD-PROTOCOL-SECRET-ROTATION-HA-STAGING-SEED-001) ──
+echo ""
+echo "=== Smoke: Protocol Secret Rotation Staging Seed ==="
+if [[ "${SKIP_STAGING_SEED:-}" == "1" ]]; then
+  echo "Staging seed SKIPPED (SKIP_STAGING_SEED=1)."
+else
+  if bash "${SCRIPT_DIR}/protocol-secret-rotation-staging-seed.sh" 2>&1; then
+    echo "Protocol secret rotation staging seed PASSED."
+  else
+    seed_rc=$?
+    echo "Protocol secret rotation staging seed FAILED (exit ${seed_rc}, review SKIPs for credential gaps)."
+  fi
+fi
+
+echo ""
 # ── Protocol & Endpoint Capability Smoke (TASK-CICD-PROTOCOL-CAPABILITY-001) ──
 echo ""
 echo "=== Smoke: Protocol & Endpoint Capability (TASK-CICD-PROTOCOL-CAPABILITY-001) ==="
