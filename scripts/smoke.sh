@@ -816,6 +816,25 @@ else
 fi
 
 echo ""
+# ── NodeAgent Control Channel Smoke (TASK-BACKEND-NODEAGENT-CONTROL-CHANNEL-001) ──
+echo ""
+echo "=== Smoke: NodeAgent Control Channel (TASK-BACKEND-NODEAGENT-CONTROL-CHANNEL-001) ==="
+if bash "${SCRIPT_DIR}/nodeagent-control-channel-smoke.sh" 2>&1; then
+  echo "NodeAgent control channel smoke PASSED."
+else
+  nactrl_rc=$?
+  echo ""
+  echo "=== NodeAgent Control Channel Smoke FAILED ==="
+  echo "--- docker compose ps ---"
+  docker compose -f "${COMPOSE_FILE}" ps 2>/dev/null || true
+  echo "--- docker compose logs backend (last 100) ---"
+  docker compose -f "${COMPOSE_FILE}" logs backend --tail=100 2>/dev/null || true
+  echo "--- docker compose logs nodeagent (last 50) ---"
+  docker compose -f "${COMPOSE_FILE}" logs nodeagent --tail=50 2>/dev/null || true
+  exit ${nactrl_rc}
+fi
+
+echo ""
 # ── NAT Sharing Guard Smoke (TASK-CICD-NAT-SHARING-GUARD-001) ─────────────────
 echo ""
 echo "=== Smoke: NAT Sharing Guard (TASK-CICD-NAT-SHARING-GUARD-001) ==="
