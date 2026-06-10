@@ -159,8 +159,15 @@ services:
       SINGBOX_PUBLIC_ENDPOINT_PORT: "${SINGBOX_PUBLIC_ENDPOINT_PORT:-8443}"
       # Required when protocol_profile=hysteria2 (static fallback auth; per-session auth layered on top).
       HYSTERIA2_AUTH: "${HYSTERIA2_AUTH:-local-dev-hy2-auth}"
-      NODEAGENT_TLS_CERT_PATH: "${NODEAGENT_TLS_CERT_PATH:-/workspace/.state/dev-hy2-tls/cert.pem}"
-      NODEAGENT_TLS_KEY_PATH: "${NODEAGENT_TLS_KEY_PATH:-/workspace/.state/dev-hy2-tls/key.pem}"
+      NODEAGENT_TLS_CERT_PATH: "/workspace/.state/prod-tls/cert.pem"
+      NODEAGENT_TLS_KEY_PATH: "/workspace/.state/prod-tls/key.pem"
+      NODEAGENT_VLESS_UUID: "${NODEAGENT_VLESS_UUID:-a1b2c3d4-e5f6-7890-abcd-ef1234567890}"
+      NODEAGENT_TROJAN_PASSWORD: "${NODEAGENT_TROJAN_PASSWORD:-trojan-dev-password-2024}"
+      NODEAGENT_SHADOWTLS_PASSWORD: "${NODEAGENT_SHADOWTLS_PASSWORD:-shadowtls-dev-password-2024}"
+      NODEAGENT_SHADOWSOCKS_PASSWORD: "${NODEAGENT_SHADOWSOCKS_PASSWORD:-ss-dev-password-2024}"
+      NODEAGENT_WIREGUARD_PRIVATE_KEY: "${NODEAGENT_WIREGUARD_PRIVATE_KEY:-}"
+      NODEAGENT_TUIC_UUID: "${NODEAGENT_TUIC_UUID:-b2c3d4e5-f6a7-8901-bcde-f12345678901}"
+      NODEAGENT_ANYTLS_PASSWORD: "${NODEAGENT_ANYTLS_PASSWORD:-anytls-dev-password-2024}"
       GOPROXY: "${GOPROXY:-https://goproxy.cn,direct}"
       GOCACHE: /workspace/.cache/go-build
       GOMODCACHE: /workspace/.cache/go/pkg/mod
