@@ -78,11 +78,6 @@ services:
       PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:-${STAGING_PUBLIC_API_BASE_URL:-https://api.livemask-vpn.com}}"
       NODEAGENT_IMAGE: "${NODEAGENT_IMAGE:-ghcr.io/myaidevs/livemask-nodeagent:dev}"
       NODEAGENT_DEFAULT_VERSION: "${NODEAGENT_DEFAULT_VERSION:-${NODEAGENT_VERSION:-dev}}"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
       interval: 3s
@@ -104,9 +99,6 @@ services:
     environment:
       BACKEND_INTERNAL_URL: "http://backend:8080"
       NEXT_TELEMETRY_DISABLED: "1"
-    depends_on:
-      backend:
-        condition: service_started
     networks:
       - livemask-staging
 
@@ -119,9 +111,6 @@ services:
     restart: unless-stopped
     ports:
       - "${LIVEMASK_WEBSITE_PORT:-64000}:3000"
-    depends_on:
-      backend:
-        condition: service_started
     networks:
       - livemask-staging
 
@@ -165,9 +154,6 @@ services:
     volumes:
       - livemask-staging-nodeagent:/var/lib/livemask-nodeagent
       - ${HY2_TLS_CERT_DIR:-/etc/letsencrypt/live/livemask-vpn.com}:/etc/livemask/hy2-tls:ro
-    depends_on:
-      backend:
-        condition: service_healthy
     networks:
       - livemask-staging
 
@@ -187,13 +173,6 @@ services:
       JOB_SERVICE_REDIS_ENABLED: "true"
       JOB_SERVICE_INTERNAL_AUTH_ENABLED: "${JOB_SERVICE_INTERNAL_AUTH_ENABLED:-false}"
       BACKEND_INTERNAL_URL: "http://backend:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      backend:
-        condition: service_started
     networks:
       - livemask-staging
 

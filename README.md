@@ -204,6 +204,22 @@ Regenerate nginx with `scripts/setup-public-nginx.sh` after port changes. The
 script writes `api`, `www`, `admin`, and `job` vhosts and proxies them to the
 ports above.
 
+Each runtime service can be recreated independently. The dev compose file does
+not use service-level `depends_on` between Backend, Admin, Website, Job Service,
+and NodeAgent, so these commands do not start unrelated application services:
+
+```bash
+docker compose -f infra/docker-compose.staging.yml up -d --build website --no-deps
+docker compose -f infra/docker-compose.staging.yml up -d --build admin --no-deps
+docker compose -f infra/docker-compose.staging.yml up -d --build backend --no-deps
+docker compose -f infra/docker-compose.staging.yml up -d --build job-service --no-deps
+docker compose -f infra/docker-compose.staging.yml up -d --build nodeagent --no-deps
+```
+
+Backend and Job Service still need reachable PostgreSQL/Redis at runtime.
+Admin, Website, and NodeAgent still need their configured Backend/API endpoint
+reachable at runtime.
+
 Current default smoke target:
 
 ```text
