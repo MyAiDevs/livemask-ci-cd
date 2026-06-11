@@ -67,6 +67,7 @@ services:
       GEOIP_UPDATE_ENABLED: "${GEOIP_UPDATE_ENABLED:-true}"
       GEOIP_UPDATE_INTERVAL: "${GEOIP_UPDATE_INTERVAL:-24h}"
       GEOIP_DATA_DIR: "${GEOIP_DATA_DIR:-data/geoip}"
+      INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:-local-dev-secret}"
       # Job Service admin gateway (dev runtime)
       JOB_SERVICE_ENABLED: "${JOB_SERVICE_ENABLED:-true}"
       JOB_SERVICE_INTERNAL_URL: "${JOB_SERVICE_INTERNAL_URL:-http://host.docker.internal:${LIVEMASK_JOB_SERVICE_PORT:-64002}}"
@@ -179,6 +180,8 @@ services:
       JOB_SERVICE_REDIS_ENABLED: "true"
       JOB_SERVICE_INTERNAL_AUTH_ENABLED: "${JOB_SERVICE_INTERNAL_AUTH_ENABLED:-false}"
       BACKEND_INTERNAL_URL: "${BACKEND_INTERNAL_URL:-http://host.docker.internal:${LIVEMASK_BACKEND_HTTP_PORT:-64003}}"
+      BACKEND_SERVICE_AUTH_MODE: "${BACKEND_SERVICE_AUTH_MODE:-internal_secret}"
+      BACKEND_INTERNAL_SECRET: "${BACKEND_INTERNAL_SECRET:-${INTERNAL_SERVICE_SECRET:-local-dev-secret}}"
     networks:
       - livemask-dev
     extra_hosts:
