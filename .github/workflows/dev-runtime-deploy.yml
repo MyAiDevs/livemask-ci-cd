@@ -151,6 +151,11 @@ jobs:
             --compose infra/docker-compose.staging.yml \
             --start-deps
 
+      - name: Seed dev test data
+        if: ${{ env.DEPLOY_SERVICE == 'backend' || env.DEPLOY_SERVICE == 'all' }}
+        run: |
+          bash scripts/seed-dev-test-data.sh
+
       - name: Collect runtime status
         if: always()
         run: |
