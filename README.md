@@ -163,7 +163,9 @@ explicitly asks for that action.
 `Staging Smoke` has been removed. Runtime validation now happens through the
 persistent `Dev Runtime Deploy` workflow after changes are merged into `dev`.
 Do not start a separate `livemask-staging-*` test stack on the public dev
-server; it can collide with the independent dev service ports.
+server. `livemask-dev` and `livemask-stage`/`livemask-staging` are a
+one-or-the-other choice on the same host, because they use the same independent
+service ports.
 
 Validation is **dev-only**. Do not run acceptance smoke from `task/*`,
 `codex/*`, or any other feature branch. A task branch can run local/unit
@@ -206,15 +208,33 @@ ports above.
 
 Each runtime service can be recreated independently. The dev compose file does
 not use service-level `depends_on` between Backend, Admin, Website, Job Service,
-and NodeAgent, so these commands do not start unrelated application services:
+and NodeAgent. Runtime services default to stable host-port endpoints such as
+`http://host.docker.internal:64003` instead of Docker service DNS such as
+`http://backend:8080`, so a single service restart does not require unrelated
+application containers to be on the same compose network.
+
+On the public runtime host, enable either `livemask-dev` or
+`livemask-stage`/`livemask-staging`, not both. `deploy-service.sh` enforces this
+guard before deployment and fails if the other stack is already running.
+
+Recommended targeted deploy entry:
 
 ```bash
-docker compose -f infra/docker-compose.staging.yml up -d --build website --no-deps
-docker compose -f infra/docker-compose.staging.yml up -d --build admin --no-deps
-docker compose -f infra/docker-compose.staging.yml up -d --build backend --no-deps
-docker compose -f infra/docker-compose.staging.yml up -d --build job-service --no-deps
-docker compose -f infra/docker-compose.staging.yml up -d --build nodeagent --no-deps
+bash scripts/deploy-service.sh --service backend --compose infra/docker-compose.staging.yml --start-deps
+bash scripts/deploy-service.sh --service admin --compose infra/docker-compose.staging.yml
+bash scripts/deploy-service.sh --service website --compose infra/docker-compose.staging.yml
+bash scripts/deploy-service.sh --service job-service --compose infra/docker-compose.staging.yml
+bash scripts/deploy-service.sh --service nodeagent --compose infra/docker-compose.staging.yml
 ```
+
+`deploy-service.sh` never runs `docker compose down`, never deletes volumes, and
+always uses `docker compose up -d --build --no-deps <service>` for app services.
+Use `--start-deps` only when PostgreSQL/Redis should be ensured before deploying
+Backend or Job Service.
+
+The GitHub `Dev Runtime Deploy` workflow also accepts a `service` input
+(`all`, `backend`, `admin`, `website`, `job-service`, `nodeagent`). Repository
+dispatch callers can pass the same value as `client_payload.service`.
 
 Backend and Job Service still need reachable PostgreSQL/Redis at runtime.
 Admin, Website, and NodeAgent still need their configured Backend/API endpoint

@@ -42,8 +42,8 @@ services:
       - "${LIVEMASK_BACKEND_HTTP_PORT:-64003}:8080"
     environment:
       PORT: "8080"
-      DB_DSN: "postgres://${POSTGRES_USER:-livemask}:${POSTGRES_PASSWORD:-livemask}@postgres:5432/${POSTGRES_DB:-livemask}?sslmode=disable"
-      REDIS_ADDR: "redis:6379"
+      DB_DSN: "${DB_DSN:-postgres://${POSTGRES_USER:-livemask}:${POSTGRES_PASSWORD:-livemask}@host.docker.internal:${POSTGRES_PORT:-15432}/${POSTGRES_DB:-livemask}?sslmode=disable}"
+      REDIS_ADDR: "${REDIS_ADDR:-host.docker.internal:${REDIS_PORT:-16379}}"
       VERSION: "${BACKEND_VERSION:-0.0.0}"
       JWT_SECRET: "${JWT_SECRET:-dev-secret-key-do-not-use-in-production-32chr}"
       CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-https://admin.livemask-vpn.com,https://www.livemask-vpn.com,https://livemask-vpn.com,http://127.0.0.1:${LIVEMASK_ADMIN_PORT:-64001},http://127.0.0.1:${LIVEMASK_WEBSITE_PORT:-64000}}"
@@ -69,10 +69,10 @@ services:
       GEOIP_DATA_DIR: "${GEOIP_DATA_DIR:-data/geoip}"
       # Job Service admin gateway (dev runtime)
       JOB_SERVICE_ENABLED: "${JOB_SERVICE_ENABLED:-true}"
-      JOB_SERVICE_INTERNAL_URL: "${JOB_SERVICE_INTERNAL_URL:-http://job-service:64002}"
+      JOB_SERVICE_INTERNAL_URL: "${JOB_SERVICE_INTERNAL_URL:-http://host.docker.internal:${LIVEMASK_JOB_SERVICE_PORT:-64002}}"
       JOB_SERVICE_AUTH_MODE: "${JOB_SERVICE_AUTH_MODE:-none}"
       JOB_SERVICE_TIMEOUT_SEC: "${JOB_SERVICE_TIMEOUT_SEC:-30}"
-      NODEAGENT_CONTROL_URL: "${NODEAGENT_CONTROL_URL:-http://nodeagent:65000}"
+      NODEAGENT_CONTROL_URL: "${NODEAGENT_CONTROL_URL:-http://host.docker.internal:${LIVEMASK_NODEAGENT_PORT:-65000}}"
       NODEAGENT_CONTROL_NODE_NAME: "${NODEAGENT_CONTROL_NODE_NAME:-local-nodeagent}"
       # Sponsor install bundle rendering (P2)
       PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:-${STAGING_PUBLIC_API_BASE_URL:-https://api.livemask-vpn.com}}"
@@ -86,21 +86,25 @@ services:
       start_period: 5s
     networks:
       - livemask-dev
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   admin:
     build:
       context: .
       dockerfile: Dockerfile.admin
       args:
-        BACKEND_INTERNAL_URL: "http://backend:8080"
+        BACKEND_INTERNAL_URL: "${BACKEND_INTERNAL_URL:-http://host.docker.internal:${LIVEMASK_BACKEND_HTTP_PORT:-64003}}"
     restart: unless-stopped
     ports:
       - "${LIVEMASK_ADMIN_PORT:-64001}:3000"
     environment:
-      BACKEND_INTERNAL_URL: "http://backend:8080"
+      BACKEND_INTERNAL_URL: "${BACKEND_INTERNAL_URL:-http://host.docker.internal:${LIVEMASK_BACKEND_HTTP_PORT:-64003}}"
       NEXT_TELEMETRY_DISABLED: "1"
     networks:
       - livemask-dev
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   website:
     build:
@@ -113,6 +117,8 @@ services:
       - "${LIVEMASK_WEBSITE_PORT:-64000}:3000"
     networks:
       - livemask-dev
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   nodeagent:
     build:
@@ -124,8 +130,9 @@ services:
       - "${SINGBOX_PUBLIC_ENDPOINT_PORT_START:-65001}-${SINGBOX_PUBLIC_ENDPOINT_PORT_END:-65535}:${SINGBOX_LISTEN_PORT_START:-65001}-${SINGBOX_LISTEN_PORT_END:-65535}/tcp"
       - "${SINGBOX_PUBLIC_ENDPOINT_PORT_START:-65001}-${SINGBOX_PUBLIC_ENDPOINT_PORT_END:-65535}:${SINGBOX_LISTEN_PORT_START:-65001}-${SINGBOX_LISTEN_PORT_END:-65535}/udp"
     environment:
-      BACKEND_BASE_URL: "http://backend:8080"
-      BACKEND_CONFIG_URL: "http://backend:8080/internal/agent/config"
+      BACKEND_BASE_URL: "${NODEAGENT_BACKEND_BASE_URL:-http://host.docker.internal:${LIVEMASK_BACKEND_HTTP_PORT:-64003}}"
+      NODEAGENT_BACKEND_URL: "${NODEAGENT_BACKEND_BASE_URL:-http://host.docker.internal:${LIVEMASK_BACKEND_HTTP_PORT:-64003}}"
+      BACKEND_CONFIG_URL: "${NODEAGENT_BACKEND_CONFIG_URL:-http://host.docker.internal:${LIVEMASK_BACKEND_HTTP_PORT:-64003}/internal/agent/config}"
       NODE_NAME: "${NODE_NAME:-local-nodeagent}"
       NODE_COUNTRY_CODE: "${NODE_COUNTRY_CODE:-US}"
       IDENTITY_PATH: /var/lib/livemask-nodeagent/identity.json
@@ -156,6 +163,8 @@ services:
       - ${HY2_TLS_CERT_DIR:-/etc/letsencrypt/live/livemask-vpn.com}:/etc/livemask/hy2-tls:ro
     networks:
       - livemask-dev
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   job-service:
     build:
@@ -167,14 +176,16 @@ services:
     environment:
       JOB_SERVICE_CONFIG: "/etc/livemask/job-service.json"
       PORT: "64002"
-      DB_DSN: "postgres://${POSTGRES_USER:-livemask}:${POSTGRES_PASSWORD:-livemask}@postgres:5432/${POSTGRES_DB:-livemask}?sslmode=disable"
+      DB_DSN: "${JOB_SERVICE_DB_DSN:-${DB_DSN:-postgres://${POSTGRES_USER:-livemask}:${POSTGRES_PASSWORD:-livemask}@host.docker.internal:${POSTGRES_PORT:-15432}/${POSTGRES_DB:-livemask}?sslmode=disable}}"
       JOB_SERVICE_MODE: "dev"
-      REDIS_ADDR: "redis:6379"
+      REDIS_ADDR: "${JOB_SERVICE_REDIS_ADDR:-${REDIS_ADDR:-host.docker.internal:${REDIS_PORT:-16379}}}"
       JOB_SERVICE_REDIS_ENABLED: "true"
       JOB_SERVICE_INTERNAL_AUTH_ENABLED: "${JOB_SERVICE_INTERNAL_AUTH_ENABLED:-false}"
-      BACKEND_INTERNAL_URL: "http://backend:8080"
+      BACKEND_INTERNAL_URL: "${BACKEND_INTERNAL_URL:-http://host.docker.internal:${LIVEMASK_BACKEND_HTTP_PORT:-64003}}"
     networks:
       - livemask-dev
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 networks:
   livemask-dev:
