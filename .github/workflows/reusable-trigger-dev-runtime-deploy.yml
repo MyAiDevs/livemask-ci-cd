@@ -16,6 +16,12 @@ name: Reusable Trigger Dev Runtime Deploy
 
 on:
   workflow_call:
+    inputs:
+      service:
+        description: "Override service to deploy. Defaults to source repository mapping."
+        required: false
+        type: string
+        default: ""
     secrets:
       LIVEMASK_BOT_TOKEN:
         required: true
@@ -36,6 +42,7 @@ jobs:
           client-payload: >-
             {
               "source_repo": "${{ github.repository }}",
+              "service": "${{ inputs.service || (github.repository == 'MyAiDevs/livemask-backend' && 'backend' || github.repository == 'MyAiDevs/livemask-admin' && 'admin' || github.repository == 'MyAiDevs/livemask-website' && 'website' || github.repository == 'MyAiDevs/livemask-job-service' && 'job-service' || github.repository == 'MyAiDevs/livemask-nodeagent' && 'nodeagent' || 'all') }}",
               "ref": "${{ github.ref_name }}",
               "sha": "${{ github.sha }}",
               "workflow": "${{ github.workflow }}",

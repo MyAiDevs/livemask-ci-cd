@@ -5,6 +5,19 @@ on:
     branches:
       - dev
   workflow_dispatch:
+    inputs:
+      service:
+        description: "Service to deploy independently"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - backend
+          - admin
+          - website
+          - job-service
+          - nodeagent
   repository_dispatch:
     types:
       - dev-runtime-deploy
@@ -50,6 +63,7 @@ jobs:
       HY2_TLS_CERT_DIR: "/etc/letsencrypt/live/api.livemask-vpn.com"
       GEOIP_UPDATE_ENABLED: "true"
       HYSTERIA2_AUTH: "DevHy2Pass-change-me"
+      DEPLOY_SERVICE: ${{ github.event.inputs.service || github.event.client_payload.service || 'all' }}
     runs-on:
       group: livemask-staging
       labels: [self-hosted, Linux, livemask, docker, staging]
@@ -64,8 +78,10 @@ jobs:
           echo "source_repo=${{ github.event.client_payload.source_repo || 'livemask-ci-cd' }}"
           echo "source_sha=${{ github.event.client_payload.sha || github.sha }}"
           echo "source_ref=${{ github.event.client_payload.ref || 'dev' }}"
+          echo "deploy_service=${DEPLOY_SERVICE}"
 
       - name: Checkout backend source into build context
+        if: ${{ env.DEPLOY_SERVICE == 'all' || env.DEPLOY_SERVICE == 'backend' }}
         uses: actions/checkout@v4
         with:
           repository: MyAiDevs/livemask-backend
@@ -74,6 +90,7 @@ jobs:
           token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
 
       - name: Checkout job-service source into build context
+        if: ${{ env.DEPLOY_SERVICE == 'all' || env.DEPLOY_SERVICE == 'job-service' }}
         uses: actions/checkout@v4
         with:
           repository: MyAiDevs/livemask-job-service
@@ -82,6 +99,7 @@ jobs:
           token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
 
       - name: Checkout admin source into build context
+        if: ${{ env.DEPLOY_SERVICE == 'all' || env.DEPLOY_SERVICE == 'admin' }}
         uses: actions/checkout@v4
         with:
           repository: MyAiDevs/livemask-admin
@@ -90,6 +108,7 @@ jobs:
           token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
 
       - name: Checkout website source into build context
+        if: ${{ env.DEPLOY_SERVICE == 'all' || env.DEPLOY_SERVICE == 'website' }}
         uses: actions/checkout@v4
         with:
           repository: MyAiDevs/livemask-website
@@ -98,6 +117,7 @@ jobs:
           token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
 
       - name: Checkout nodeagent source into build context
+        if: ${{ env.DEPLOY_SERVICE == 'all' || env.DEPLOY_SERVICE == 'nodeagent' }}
         uses: actions/checkout@v4
         with:
           repository: MyAiDevs/livemask-nodeagent
@@ -126,8 +146,12 @@ jobs:
           echo "  job public URL:     https://job.livemask-vpn.com"
           docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
 
-      - name: Start persistent dev runtime
-        run: docker compose -f infra/docker-compose.staging.yml up -d --build
+      - name: Deploy requested service independently
+        run: |
+          bash scripts/deploy-service.sh \
+            --service "${DEPLOY_SERVICE}" \
+            --compose infra/docker-compose.staging.yml \
+            --start-deps
 
       - name: Collect runtime status
         if: always()
@@ -139,12 +163,14 @@ jobs:
             --output /tmp/livemask-runtime/status.json
 
       - name: Verify dev backend health
+        if: ${{ env.DEPLOY_SERVICE == 'all' }}
         run: |
           echo "Checking host URL http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT}/api/v1/health"
           echo "This maps to backend container port 8080."
           curl -fsS "http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT}/api/v1/health"
 
       - name: Verify dev frontend routes
+        if: ${{ env.DEPLOY_SERVICE == 'all' }}
         run: |
           check_url() {
             local name="$1"
@@ -197,6 +223,7 @@ jobs:
           echo "admin jobs gateway reachable: HTTP ${jobs_code}"
 
       - name: Verify browser-facing dev runtime config
+        if: ${{ env.DEPLOY_SERVICE == 'all' }}
         run: |
           echo "Checking website bundle does not point browser clients at 127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT}"
           if docker compose -f infra/docker-compose.staging.yml exec -T website sh -lc "grep -R \"127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT}\" -n /app/dist >/tmp/livemask-localhost-api.txt 2>/dev/null"; then
