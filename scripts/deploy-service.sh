@@ -191,7 +191,7 @@ health_one() {
       wait_http job-service "http://127.0.0.1:${LIVEMASK_JOB_SERVICE_PORT:-64002}/healthz" "^200$"
       ;;
     nodeagent)
-      wait_http nodeagent "http://127.0.0.1:${LIVEMASK_NODEAGENT_PORT:-65000}/agent/status" "^200$"
+      wait_http nodeagent "http://127.0.0.1:${LIVEMASK_NODEAGENT_PORT:-65000}/app/probe" "^200$"
       ;;
   esac
 }
