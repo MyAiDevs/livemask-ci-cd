@@ -226,7 +226,7 @@ print(json.dumps(h))
 " 2>/dev/null || echo "$HEALTH_RESULTS")
 
   # Job-service health (if running)
-  JS_HEALTH_URL="http://127.0.0.1:${JOB_PORT}/health"
+  JS_HEALTH_URL="http://127.0.0.1:${JOB_PORT}/healthz"
   JS_HEALTH_RESPONSE=$(curl -sS --max-time 3 "${JS_HEALTH_URL}" 2>/dev/null || true)
   JS_HEALTH_OK=false
   if [[ -n "${JS_HEALTH_RESPONSE}" ]]; then
@@ -361,7 +361,7 @@ result = {
         'backend': 'http://127.0.0.1:' + backend_port + '/api/v1/health',
         'admin': 'http://127.0.0.1:' + admin_port + '/login',
         'website': 'http://127.0.0.1:' + website_port + '/',
-        'job-service': 'http://127.0.0.1:' + job_port + '/health'
+        'job-service': 'http://127.0.0.1:' + job_port + '/healthz'
     },
     'compose_up_detected': json.loads(os.environ['COMPOSE_UP_DETECTED_ENV']),
     'all_containers_up': json.loads(os.environ['ALL_CONTAINERS_UP_ENV']),
