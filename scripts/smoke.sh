@@ -371,6 +371,22 @@ else
 fi
 
 echo ""
+# ── Staging App/Website Announcement Seed (TASK-CICD-STAGING-APP-ANNOUNCEMENT-SEED-001) ──
+echo "=== Seed: App and Website Announcements (TASK-CICD-STAGING-APP-ANNOUNCEMENT-SEED-001) ==="
+if bash "${SCRIPT_DIR}/seed-app-announcements.sh" 2>&1; then
+  echo "App and Website announcement seed PASSED."
+else
+  seed_announcement_rc=$?
+  echo ""
+  echo "=== App and Website Announcement Seed FAILED ==="
+  echo "--- docker compose ps ---"
+  docker compose -f "${COMPOSE_FILE}" ps 2>/dev/null || true
+  echo "--- docker compose logs backend (last 100) ---"
+  docker compose -f "${COMPOSE_FILE}" logs backend --tail=100 2>/dev/null || true
+  exit ${seed_announcement_rc}
+fi
+
+echo ""
 # ── GeoIP Smoke (TASK-CICD-GEOIP-001) ──────────────────────────────────
 echo ""
 echo "=== Smoke: GeoIP System (TASK-CICD-GEOIP-001) ==="
