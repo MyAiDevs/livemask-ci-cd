@@ -40,26 +40,26 @@ if [[ -z "${LARK_BOT_WEBHOOK:-}" ]]; then
   exit 0
 fi
 
-# Load runtime status JSON: from env var, file arg, or stdin
-RUNTIME_JSON="${RUNTIME_STATUS_JSON:-}"
-if [[ -z "${RUNTIME_JSON}" && -n "${STATUS_FILE}" && -f "${STATUS_FILE}" ]]; then
-  RUNTIME_JSON=$(cat "${STATUS_FILE}")
-fi
-
-# If STAGING_RUNTIME_STATUS is set (from workflow output), use that
-if [[ -z "${RUNTIME_JSON}" && -n "${STAGING_RUNTIME_STATUS:-}" ]]; then
-  RUNTIME_JSON="${STAGING_RUNTIME_STATUS}"
-fi
-
-# Fallback: empty JSON
-if [[ -z "${RUNTIME_JSON}" ]]; then
-  RUNTIME_JSON='{"compose_up_detected":null,"all_containers_up":null,"container_summary":"no data","health_all_pass":null,"refs":{}}'
+RUNTIME_TMP_FILE=""
+if [[ -n "${STATUS_FILE}" && -f "${STATUS_FILE}" ]]; then
+  RUNTIME_JSON_FILE="${STATUS_FILE}"
+else
+  RUNTIME_TMP_FILE="$(mktemp)"
+  trap '[[ -z "${RUNTIME_TMP_FILE}" ]] || rm -f "${RUNTIME_TMP_FILE}"' EXIT
+  if [[ -n "${RUNTIME_STATUS_JSON:-}" ]]; then
+    printf '%s' "${RUNTIME_STATUS_JSON}" > "${RUNTIME_TMP_FILE}"
+  elif [[ -n "${STAGING_RUNTIME_STATUS:-}" ]]; then
+    printf '%s' "${STAGING_RUNTIME_STATUS}" > "${RUNTIME_TMP_FILE}"
+  else
+    printf '%s' '{"compose_up_detected":null,"all_containers_up":null,"container_summary":"no data","health_all_pass":null,"refs":{}}' > "${RUNTIME_TMP_FILE}"
+  fi
+  RUNTIME_JSON_FILE="${RUNTIME_TMP_FILE}"
 fi
 
 # ============================================================
 # Build and send Lark card via Python
 # ============================================================
-python3 - "$RESULT" "$RUNTIME_JSON" <<'PYTHON_SCRIPT'
+python3 - "$RESULT" "$RUNTIME_JSON_FILE" <<'PYTHON_SCRIPT'
 import base64
 import hashlib
 import hmac
@@ -94,7 +94,12 @@ def plain_lines(text, limit=1200):
     return truncate_text(str(text or "").strip() or "No details", limit)
 
 result = sys.argv[1]
-runtime_json_raw = sys.argv[2]
+runtime_json_file = sys.argv[2]
+try:
+    with open(runtime_json_file, "r", encoding="utf-8") as handle:
+        runtime_json_raw = handle.read()
+except Exception:
+    runtime_json_raw = "{}"
 
 # Parse runtime status
 try:
