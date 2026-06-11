@@ -61,6 +61,7 @@ services:
       JOB_SERVICE_TIMEOUT_SEC: "${JOB_SERVICE_TIMEOUT_SEC:-30}"
       NODEAGENT_CONTROL_URL: "${NODEAGENT_CONTROL_URL:-http://host.docker.internal:${LIVEMASK_NODEAGENT_PORT:-65000}}"
       NODEAGENT_CONTROL_NODE_NAME: "${NODEAGENT_CONTROL_NODE_NAME:-local-nodeagent}"
+      NODEAGENT_CONTROL_TOKEN: "${NODEAGENT_CONTROL_TOKEN:-dev-nodeagent-control-token-change-me}"
       # Sponsor install bundle rendering (P2)
       PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:-${STAGING_PUBLIC_API_BASE_URL:-https://api.livemask-vpn.com}}"
       NODEAGENT_IMAGE: "${NODEAGENT_IMAGE:-ghcr.io/myaidevs/livemask-nodeagent:dev}"
@@ -127,6 +128,7 @@ services:
       CONFIG_CACHE_PATH: /var/lib/livemask-nodeagent/runtime_config.json
       LISTEN_ADDR: ":${LIVEMASK_NODEAGENT_SERVICE_PORT:-65000}"
       NODEAGENT_PORT: "${LIVEMASK_NODEAGENT_SERVICE_PORT:-65000}"
+      NODEAGENT_CONTROL_TOKEN: "${NODEAGENT_CONTROL_TOKEN:-dev-nodeagent-control-token-change-me}"
       POLL_INTERVAL_SEC: "${POLL_INTERVAL_SEC:-30}"
       LOG_UPLOAD_ENABLED: "${LOG_UPLOAD_ENABLED:-true}"
       GEOIP_ENABLED: "${GEOIP_ENABLED:-true}"

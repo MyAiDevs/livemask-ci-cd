@@ -54,6 +54,7 @@ services:
       # Local dev control-plane URL used by Backend to call the bundled NodeAgent.
       NODEAGENT_CONTROL_URL: "${NODEAGENT_CONTROL_URL:-http://nodeagent:9100}"
       NODEAGENT_CONTROL_NODE_NAME: "${NODEAGENT_CONTROL_NODE_NAME:-local-nodeagent}"
+      NODEAGENT_CONTROL_TOKEN: "${NODEAGENT_CONTROL_TOKEN:-dev-nodeagent-control-token-change-me}"
       GOPROXY: "${GOPROXY:-https://goproxy.cn,direct}"
       GOCACHE: /workspace/.cache/go-build
       GOMODCACHE: /workspace/.cache/go/pkg/mod
@@ -120,6 +121,7 @@ services:
       AGENT_VERSION: "${AGENT_VERSION:-dev-local}"
       CONFIG_CACHE_PATH: /workspace/.state/nodeagent-config-cache.json
       LISTEN_ADDR: ":9100"
+      NODEAGENT_CONTROL_TOKEN: "${NODEAGENT_CONTROL_TOKEN:-dev-nodeagent-control-token-change-me}"
       POLL_INTERVAL_SEC: "${POLL_INTERVAL_SEC:-30}"
       SPEEDTEST_DOWNLOAD_URL: "${SPEEDTEST_DOWNLOAD_URL:-}"
       LOG_UPLOAD_ENABLED: "${LOG_UPLOAD_ENABLED:-true}"
