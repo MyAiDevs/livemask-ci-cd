@@ -291,54 +291,95 @@ COMPOSE_UP_DETECTED_JSON="$(bool_json "${COMPOSE_UP_DETECTED}")"
 ALL_CONTAINERS_UP_JSON="$(bool_json "${ALL_CONTAINERS_UP}")"
 HEALTH_ALL_PASS_JSON="$(bool_json "${HEALTH_ALL_PASS}")"
 
-STATUS_JSON=$(python3 -c "
+STATUS_JSON=$(
+FAILED_CONTAINERS_ENV="${FAILED_CONTAINERS}" \
+HEALTH_DETAILS_ENV="${HEALTH_DETAILS}" \
+ERROR_EXCERPTS_ENV="${ERROR_EXCERPTS}" \
+CONTAINER_JSON_ENV="${CONTAINER_JSON}" \
+HOSTNAME_ENV="${HOSTNAME}" \
+UPTIME_ENV="${UPTIME}" \
+ENV_TYPE_ENV="${ENV_TYPE}" \
+COMPOSE_BASENAME_ENV="${COMPOSE_BASENAME}" \
+BACKEND_PORT_ENV="${BACKEND_PORT}" \
+ADMIN_PORT_ENV="${ADMIN_PORT}" \
+WEBSITE_PORT_ENV="${WEBSITE_PORT}" \
+JOB_PORT_ENV="${JOB_PORT}" \
+NODEAGENT_PORT_ENV="${NODEAGENT_PORT}" \
+NODEAGENT_VPN_PORT_RANGE_ENV="${NODEAGENT_VPN_PORT_RANGE}" \
+POSTGRES_HOST_PORT_ENV="${POSTGRES_HOST_PORT}" \
+REDIS_HOST_PORT_ENV="${REDIS_HOST_PORT}" \
+COMPOSE_UP_DETECTED_ENV="${COMPOSE_UP_DETECTED_JSON}" \
+ALL_CONTAINERS_UP_ENV="${ALL_CONTAINERS_UP_JSON}" \
+HEALTH_ALL_PASS_ENV="${HEALTH_ALL_PASS_JSON}" \
+CONTAINER_SUMMARY_ENV="${CONTAINER_SUMMARY}" \
+BACKEND_REF_VALUE_ENV="${BACKEND_REF_VALUE}" \
+JOB_SERVICE_REF_VALUE_ENV="${JOB_SERVICE_REF_VALUE}" \
+ADMIN_REF_VALUE_ENV="${ADMIN_REF_VALUE}" \
+WEBSITE_REF_VALUE_ENV="${WEBSITE_REF_VALUE}" \
+NODEAGENT_REF_VALUE_ENV="${NODEAGENT_REF_VALUE}" \
+APP_REF_VALUE_ENV="${APP_REF_VALUE}" \
+python3 -c "
 import json
+import os
 
-failed_containers = '''${FAILED_CONTAINERS}'''.strip()
-health_details = '''${HEALTH_DETAILS}'''.strip()
-error_excerpts = '''${ERROR_EXCERPTS}'''.strip()
+containers_raw = os.environ.get('CONTAINER_JSON_ENV') or '[]'
+try:
+    containers = json.loads(containers_raw)
+except Exception:
+    containers = []
+
+failed_containers = os.environ.get('FAILED_CONTAINERS_ENV', '').strip()
+health_details = os.environ.get('HEALTH_DETAILS_ENV', '').strip()
+error_excerpts = os.environ.get('ERROR_EXCERPTS_ENV', '').strip()
+
+backend_port = os.environ['BACKEND_PORT_ENV']
+admin_port = os.environ['ADMIN_PORT_ENV']
+website_port = os.environ['WEBSITE_PORT_ENV']
+job_port = os.environ['JOB_PORT_ENV']
+nodeagent_port = os.environ['NODEAGENT_PORT_ENV']
+nodeagent_vpn_range = os.environ['NODEAGENT_VPN_PORT_RANGE_ENV']
 
 result = {
     'schema_version': 1,
     'timestamp': '$(date -u +'%Y-%m-%dT%H:%M:%SZ')',
-    'hostname': '${HOSTNAME}',
-    'uptime': '${UPTIME}',
-    'environment': '${ENV_TYPE}',
-    'compose_file': '${COMPOSE_BASENAME}',
-    'compose_project': 'livemask-${ENV_TYPE}',
+    'hostname': os.environ.get('HOSTNAME_ENV', 'unknown'),
+    'uptime': os.environ.get('UPTIME_ENV', 'unknown'),
+    'environment': os.environ.get('ENV_TYPE_ENV', 'staging'),
+    'compose_file': os.environ.get('COMPOSE_BASENAME_ENV', ''),
+    'compose_project': 'livemask-' + os.environ.get('ENV_TYPE_ENV', 'staging'),
     'host_port_map': {
-        'backend': '${BACKEND_PORT}->8080',
-        'admin': '${ADMIN_PORT}->3000',
-        'website': '${WEBSITE_PORT}->3000/5173',
-        'job-service': '${JOB_PORT}->64002',
-        'nodeagent': '${NODEAGENT_PORT}->65000',
-        'nodeagent-vpn': '${NODEAGENT_VPN_PORT_RANGE}->${NODEAGENT_VPN_PORT_RANGE}/tcp,udp',
-        'postgres': '${POSTGRES_HOST_PORT}->5432',
-        'redis': '${REDIS_HOST_PORT}->6379'
+        'backend': backend_port + '->8080',
+        'admin': admin_port + '->3000',
+        'website': website_port + '->3000',
+        'job-service': job_port + '->64002',
+        'nodeagent': nodeagent_port + '->65000',
+        'nodeagent-vpn': nodeagent_vpn_range + '->' + nodeagent_vpn_range + '/tcp,udp',
+        'postgres': os.environ['POSTGRES_HOST_PORT_ENV'] + '->5432',
+        'redis': os.environ['REDIS_HOST_PORT_ENV'] + '->6379'
     },
     'host_health_urls': {
-        'backend': 'http://127.0.0.1:${BACKEND_PORT}/api/v1/health',
-        'admin': 'http://127.0.0.1:${ADMIN_PORT}/login',
-        'website': 'http://127.0.0.1:${WEBSITE_PORT}/',
-        'job-service': 'http://127.0.0.1:${JOB_PORT}/health'
+        'backend': 'http://127.0.0.1:' + backend_port + '/api/v1/health',
+        'admin': 'http://127.0.0.1:' + admin_port + '/login',
+        'website': 'http://127.0.0.1:' + website_port + '/',
+        'job-service': 'http://127.0.0.1:' + job_port + '/health'
     },
-    'compose_up_detected': json.loads('${COMPOSE_UP_DETECTED_JSON}'),
-    'all_containers_up': json.loads('${ALL_CONTAINERS_UP_JSON}'),
-    'container_summary': '${CONTAINER_SUMMARY}',
-    'containers': ${CONTAINER_JSON},
-    'failed_containers': '${FAILED_CONTAINERS}',
+    'compose_up_detected': json.loads(os.environ['COMPOSE_UP_DETECTED_ENV']),
+    'all_containers_up': json.loads(os.environ['ALL_CONTAINERS_UP_ENV']),
+    'container_summary': os.environ.get('CONTAINER_SUMMARY_ENV', ''),
+    'containers': containers,
+    'failed_containers': failed_containers,
     'refs': {
-        'BACKEND_REF': '${BACKEND_REF_VALUE}',
-        'JOB_SERVICE_REF': '${JOB_SERVICE_REF_VALUE}',
-        'ADMIN_REF': '${ADMIN_REF_VALUE}',
-        'WEBSITE_REF': '${WEBSITE_REF_VALUE}',
-        'NODEAGENT_REF': '${NODEAGENT_REF_VALUE}'
+        'BACKEND_REF': os.environ.get('BACKEND_REF_VALUE_ENV', ''),
+        'JOB_SERVICE_REF': os.environ.get('JOB_SERVICE_REF_VALUE_ENV', ''),
+        'ADMIN_REF': os.environ.get('ADMIN_REF_VALUE_ENV', ''),
+        'WEBSITE_REF': os.environ.get('WEBSITE_REF_VALUE_ENV', ''),
+        'NODEAGENT_REF': os.environ.get('NODEAGENT_REF_VALUE_ENV', '')
     },
     'local_only_refs': {
-        'APP_REF': '${APP_REF_VALUE}'
+        'APP_REF': os.environ.get('APP_REF_VALUE_ENV', '')
     },
-    'compose_up_result': '${COMPOSE_UP_DETECTED}',
-    'health_all_pass': json.loads('${HEALTH_ALL_PASS_JSON}'),
+    'compose_up_result': os.environ.get('COMPOSE_UP_DETECTED_ENV', 'false'),
+    'health_all_pass': json.loads(os.environ['HEALTH_ALL_PASS_ENV']),
     'health_details': health_details if health_details else '',
     'error_excerpts': error_excerpts if error_excerpts else ''
 }
