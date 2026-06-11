@@ -75,7 +75,7 @@ services:
       NODEAGENT_CONTROL_URL: "${NODEAGENT_CONTROL_URL:-http://nodeagent:9100}"
       NODEAGENT_CONTROL_NODE_NAME: "${NODEAGENT_CONTROL_NODE_NAME:-local-nodeagent}"
       # Sponsor install bundle rendering (P2)
-      PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:?PUBLIC_API_BASE_URL must be a public API domain for Website and sponsor NodeAgent install bundles}"
+      PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:-${STAGING_PUBLIC_API_BASE_URL:-http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT:-18080}}}"
       NODEAGENT_IMAGE: "${NODEAGENT_IMAGE:-ghcr.io/myaidevs/livemask-nodeagent:dev}"
       NODEAGENT_DEFAULT_VERSION: "${NODEAGENT_DEFAULT_VERSION:-${NODEAGENT_VERSION:-dev}}"
     depends_on:
@@ -115,7 +115,7 @@ services:
       context: .
       dockerfile: Dockerfile.website
       args:
-        VITE_API_BASE_URL: "${PUBLIC_API_BASE_URL:?PUBLIC_API_BASE_URL must be a public API domain for Website and sponsor NodeAgent install bundles}"
+        VITE_API_BASE_URL: "${PUBLIC_API_BASE_URL:-${STAGING_PUBLIC_API_BASE_URL:-http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT:-18080}}}"
     restart: unless-stopped
     ports:
       - "${LIVEMASK_WEBSITE_PORT:-3002}:3000"
