@@ -26,11 +26,46 @@ RUN chmod +x scripts/build-protected-release.sh \
 
 # stage 2: runtime
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates curl tar wget
+ARG NODEAGENT_VERSION=dev
+RUN apk add --no-cache ca-certificates curl python3 tar wget
 WORKDIR /app
-COPY --from=builder /out/nodeagent .
+COPY --from=builder /out/nodeagent /usr/local/bin/livemask-nodeagent
 COPY _build_deps/nodeagent/scripts/install-singbox.sh /usr/local/bin/install-singbox.sh
-RUN sh /usr/local/bin/install-singbox.sh /usr/local/bin
+COPY _build_deps/nodeagent/docker/entrypoint.sh /usr/local/bin/livemask-nodeagent-entrypoint
+RUN chmod +x /usr/local/bin/livemask-nodeagent-entrypoint /usr/local/bin/install-singbox.sh \
+    && sh /usr/local/bin/install-singbox.sh /usr/local/bin \
+    && mkdir -p /var/lib/livemask-nodeagent /var/lib/livemask-nodeagent/sing-box /var/lib/livemask-nodeagent/geoip /var/lib/livemask-nodeagent/releases
+ENV NODEAGENT_ENDPOINT_CONFIG_URL="https://gitlab.com/sammytan/livemaskvpn/-/raw/main/cfg.json" \
+    NODEAGENT_API_ENDPOINTS="https://api.livemask-vpn.com https://api.vpn-mirrors.xyz https://api.vpn-mirrors.cfd" \
+    NODEAGENT_JOB_ENDPOINTS="https://job.livemask-vpn.com https://job.vpn-mirrors.xyz https://job.vpn-mirrors.cfd" \
+    NODEAGENT_ENDPOINT_AUTO_RESOLVE="true" \
+    NODEAGENT_INSTALL_SINGBOX_ON_START="true" \
+    NODEAGENT_AUTO_DETECT_PUBLIC_ENDPOINT="true" \
+    NODEAGENT_API_PROBE_PATH="/api/v1/health" \
+    NODEAGENT_ENDPOINT_PROBE_TIMEOUT_SEC="5" \
+    NODEAGENT_REGISTRATION_ENABLED="true" \
+    NODEAGENT_PORT="9100" \
+    LISTEN_ADDR=":9100" \
+    AGENT_VERSION="${NODEAGENT_VERSION}" \
+    NODEAGENT_AGENT_VERSION="${NODEAGENT_VERSION}" \
+    IDENTITY_PATH="/var/lib/livemask-nodeagent/identity.json" \
+    CREDENTIAL_PATH="/var/lib/livemask-nodeagent/credentials.json" \
+    CONFIG_CACHE_PATH="/var/lib/livemask-nodeagent/runtime_config.json" \
+    NODEAGENT_RUNTIME_CONFIG_CACHE_PATH="/var/lib/livemask-nodeagent/runtime_config.json" \
+    NODEAGENT_RUNTIME_CONFIG_LKG_PATH="/var/lib/livemask-nodeagent/runtime_config.lkg.json" \
+    NODEAGENT_SINGBOX_CONFIG_PATH="/var/lib/livemask-nodeagent/sing-box/config.json" \
+    NODEAGENT_SINGBOX_WORK_DIR="/var/lib/livemask-nodeagent/sing-box" \
+    NODEAGENT_GEOIP_CACHE_DIR="/var/lib/livemask-nodeagent/geoip" \
+    NODEAGENT_RELEASE_ARTIFACT_DIR="/var/lib/livemask-nodeagent/releases" \
+    SINGBOX_LISTEN_HOST="0.0.0.0" \
+    SINGBOX_LISTEN_PORT="8443" \
+    SINGBOX_PUBLIC_ENDPOINT_PORT="8443" \
+    GEOIP_ENABLED="true" \
+    NODEAGENT_GEOIP_ENABLED="true" \
+    LOG_UPLOAD_ENABLED="true" \
+    METRICS_ENABLED="true"
+VOLUME ["/var/lib/livemask-nodeagent"]
 EXPOSE 9100/tcp
 EXPOSE 8443/udp
-CMD ["./nodeagent"]
+ENTRYPOINT ["/usr/local/bin/livemask-nodeagent-entrypoint"]
+CMD ["/usr/local/bin/livemask-nodeagent"]
