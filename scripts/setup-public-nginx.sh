@@ -7,10 +7,10 @@ set -euo pipefail
 
 PRIMARY_DOMAIN="${PRIMARY_DOMAIN:-livemask-vpn.com}"
 MIRROR_DOMAINS="${MIRROR_DOMAINS:-vpn-mirrors.xyz,vpn-mirrors.cfd}"
-BACKEND_PORT="${BACKEND_PORT:-18080}"
-ADMIN_PORT="${ADMIN_PORT:-3001}"
-WEBSITE_PORT="${WEBSITE_PORT:-3002}"
-JOB_PORT="${JOB_PORT:-19191}"
+WEBSITE_PORT="${WEBSITE_PORT:-64000}"
+ADMIN_PORT="${ADMIN_PORT:-64001}"
+JOB_PORT="${JOB_PORT:-64002}"
+BACKEND_PORT="${BACKEND_PORT:-64003}"
 EMAIL="${CERTBOT_EMAIL:-admin@${PRIMARY_DOMAIN}}"
 
 info() { echo "[setup-public-nginx] $*"; }
@@ -42,6 +42,11 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
     }
 }
 EOF

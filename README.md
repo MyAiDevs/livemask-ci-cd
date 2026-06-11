@@ -185,10 +185,29 @@ NodeAgent-protocol smoke rules (mandatory for local runtime):
 The workflow and compose defaults set service refs to `dev`. `scripts/validate-dev-ref.sh`
 fails fast if a smoke run tries to use a non-`dev` service ref.
 
+## Public Dev Runtime
+
+`Dev Runtime Deploy` runs `infra/docker-compose.staging.yml` as the public dev
+stack. Public domains terminate at nginx on `80/443` and proxy to independent
+host ports:
+
+| Service | Public domain | Host port |
+| --- | --- | --- |
+| Website | `www.livemask-vpn.com` | `64000` |
+| Admin | `admin.livemask-vpn.com` | `64001` |
+| Job Service | `job.livemask-vpn.com` | `64002` |
+| Backend API | `api.livemask-vpn.com` | `64003` |
+| NodeAgent control | direct host port | `65000` |
+| NodeAgent VPN business pool | direct host ports | `65001-65535/tcp,udp` |
+
+Regenerate nginx with `scripts/setup-public-nginx.sh` after port changes. The
+script writes `api`, `www`, `admin`, and `job` vhosts and proxies them to the
+ports above.
+
 Current default smoke target:
 
 ```text
-http://127.0.0.1:18080
+http://127.0.0.1:64003
 ```
 
 Override when needed:

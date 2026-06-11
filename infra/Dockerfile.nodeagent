@@ -45,8 +45,8 @@ ENV NODEAGENT_ENDPOINT_CONFIG_URL="https://gitlab.com/sammytan/livemaskvpn/-/raw
     NODEAGENT_ENDPOINT_PROBE_TIMEOUT_SEC="5" \
     NODEAGENT_REGISTRATION_ENABLED="true" \
     NODEAGENT_APP_CONNECT_ONLY="true" \
-    NODEAGENT_PORT="9100" \
-    LISTEN_ADDR=":9100" \
+    NODEAGENT_PORT="65000" \
+    LISTEN_ADDR=":65000" \
     AGENT_VERSION="${NODEAGENT_VERSION}" \
     NODEAGENT_AGENT_VERSION="${NODEAGENT_VERSION}" \
     IDENTITY_PATH="/var/lib/livemask-nodeagent/identity.json" \
@@ -61,14 +61,15 @@ ENV NODEAGENT_ENDPOINT_CONFIG_URL="https://gitlab.com/sammytan/livemaskvpn/-/raw
     SINGBOX_PROTOCOL_PROFILE="hysteria2" \
     SINGBOX_TRANSPORT="udp" \
     SINGBOX_LISTEN_HOST="0.0.0.0" \
-    SINGBOX_LISTEN_PORT="8443" \
-    SINGBOX_PUBLIC_ENDPOINT_PORT="8443" \
+    SINGBOX_LISTEN_PORT="65001" \
+    SINGBOX_PUBLIC_ENDPOINT_PORT="65001" \
     GEOIP_ENABLED="true" \
     NODEAGENT_GEOIP_ENABLED="true" \
     LOG_UPLOAD_ENABLED="true" \
     METRICS_ENABLED="true"
 VOLUME ["/var/lib/livemask-nodeagent"]
-EXPOSE 9100/tcp
-EXPOSE 8443/udp
+EXPOSE 65000/tcp
+EXPOSE 65001-65535/tcp
+EXPOSE 65001-65535/udp
 ENTRYPOINT ["/usr/local/bin/livemask-nodeagent-entrypoint"]
 CMD ["/usr/local/bin/livemask-nodeagent"]
