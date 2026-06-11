@@ -133,7 +133,6 @@ services:
       BACKEND_BASE_URL: "${NODEAGENT_BACKEND_BASE_URL:-http://host.docker.internal:${LIVEMASK_BACKEND_HTTP_PORT:-64003}}"
       NODEAGENT_BACKEND_URL: "${NODEAGENT_BACKEND_BASE_URL:-http://host.docker.internal:${LIVEMASK_BACKEND_HTTP_PORT:-64003}}"
       BACKEND_CONFIG_URL: "${NODEAGENT_BACKEND_CONFIG_URL:-http://host.docker.internal:${LIVEMASK_BACKEND_HTTP_PORT:-64003}/internal/agent/config}"
-      NODE_NAME: "${NODE_NAME:-local-nodeagent}"
       NODE_COUNTRY_CODE: "${NODE_COUNTRY_CODE:-US}"
       IDENTITY_PATH: /var/lib/livemask-nodeagent/identity.json
       CREDENTIAL_PATH: /var/lib/livemask-nodeagent/credentials.json
