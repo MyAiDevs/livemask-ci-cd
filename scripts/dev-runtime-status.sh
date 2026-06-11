@@ -291,11 +291,22 @@ COMPOSE_UP_DETECTED_JSON="$(bool_json "${COMPOSE_UP_DETECTED}")"
 ALL_CONTAINERS_UP_JSON="$(bool_json "${ALL_CONTAINERS_UP}")"
 HEALTH_ALL_PASS_JSON="$(bool_json "${HEALTH_ALL_PASS}")"
 
+STATUS_TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "${STATUS_TMP_DIR}"' EXIT
+CONTAINER_JSON_FILE="${STATUS_TMP_DIR}/containers.json"
+FAILED_CONTAINERS_FILE="${STATUS_TMP_DIR}/failed-containers.txt"
+HEALTH_DETAILS_FILE="${STATUS_TMP_DIR}/health-details.txt"
+ERROR_EXCERPTS_FILE="${STATUS_TMP_DIR}/error-excerpts.txt"
+printf '%s' "${CONTAINER_JSON}" > "${CONTAINER_JSON_FILE}"
+printf '%b' "${FAILED_CONTAINERS}" > "${FAILED_CONTAINERS_FILE}"
+printf '%b' "${HEALTH_DETAILS}" > "${HEALTH_DETAILS_FILE}"
+printf '%b' "${ERROR_EXCERPTS}" > "${ERROR_EXCERPTS_FILE}"
+
 STATUS_JSON=$(
-FAILED_CONTAINERS_ENV="${FAILED_CONTAINERS}" \
-HEALTH_DETAILS_ENV="${HEALTH_DETAILS}" \
-ERROR_EXCERPTS_ENV="${ERROR_EXCERPTS}" \
-CONTAINER_JSON_ENV="${CONTAINER_JSON}" \
+FAILED_CONTAINERS_FILE_ENV="${FAILED_CONTAINERS_FILE}" \
+HEALTH_DETAILS_FILE_ENV="${HEALTH_DETAILS_FILE}" \
+ERROR_EXCERPTS_FILE_ENV="${ERROR_EXCERPTS_FILE}" \
+CONTAINER_JSON_FILE_ENV="${CONTAINER_JSON_FILE}" \
 HOSTNAME_ENV="${HOSTNAME}" \
 UPTIME_ENV="${UPTIME}" \
 ENV_TYPE_ENV="${ENV_TYPE}" \
@@ -322,15 +333,25 @@ python3 -c "
 import json
 import os
 
-containers_raw = os.environ.get('CONTAINER_JSON_ENV') or '[]'
+def read_text_env_path(env_key, default=''):
+    path = os.environ.get(env_key)
+    if not path:
+        return default
+    try:
+        with open(path, 'r', encoding='utf-8') as handle:
+            return handle.read()
+    except Exception:
+        return default
+
+containers_raw = read_text_env_path('CONTAINER_JSON_FILE_ENV', '[]') or '[]'
 try:
     containers = json.loads(containers_raw)
 except Exception:
     containers = []
 
-failed_containers = os.environ.get('FAILED_CONTAINERS_ENV', '').strip()
-health_details = os.environ.get('HEALTH_DETAILS_ENV', '').strip()
-error_excerpts = os.environ.get('ERROR_EXCERPTS_ENV', '').strip()
+failed_containers = read_text_env_path('FAILED_CONTAINERS_FILE_ENV').strip()
+health_details = read_text_env_path('HEALTH_DETAILS_FILE_ENV').strip()
+error_excerpts = read_text_env_path('ERROR_EXCERPTS_FILE_ENV').strip()
 
 backend_port = os.environ['BACKEND_PORT_ENV']
 admin_port = os.environ['ADMIN_PORT_ENV']
