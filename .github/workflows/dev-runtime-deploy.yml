@@ -26,19 +26,25 @@ jobs:
       WEBSITE_REF: dev
       NODEAGENT_REF: dev
       LIVEMASK_STACK_NAME: livemask-dev
-      LIVEMASK_BACKEND_HTTP_PORT: "18080"
-      LIVEMASK_ADMIN_PORT: "3001"
-      LIVEMASK_WEBSITE_PORT: "3002"
-      LIVEMASK_NODEAGENT_PORT: "19090"
-      LIVEMASK_JOB_SERVICE_PORT: "19191"
+      LIVEMASK_WEBSITE_PORT: "64000"
+      LIVEMASK_ADMIN_PORT: "64001"
+      LIVEMASK_JOB_SERVICE_PORT: "64002"
+      LIVEMASK_BACKEND_HTTP_PORT: "64003"
+      LIVEMASK_NODEAGENT_PORT: "65000"
+      LIVEMASK_NODEAGENT_SERVICE_PORT: "65000"
+      SINGBOX_PUBLIC_ENDPOINT_PORT_START: "65001"
+      SINGBOX_PUBLIC_ENDPOINT_PORT_END: "65535"
+      SINGBOX_LISTEN_PORT_START: "65001"
+      SINGBOX_LISTEN_PORT_END: "65535"
       POSTGRES_PORT: "15432"
       REDIS_PORT: "16379"
       LIVEMASK_PUBLIC_HOST: "47.243.128.122"
       PUBLIC_API_BASE_URL: "https://api.livemask-vpn.com"
       PUBLIC_PRIMARY_DOMAIN: "livemask-vpn.com"
-      CORS_ALLOWED_ORIGINS: "https://api.vpn-mirrors.xyz,https://vpn-mirrors.xyz,https://api.vpn-mirrors.cfd,https://vpn-mirrors.cfd,http://47.243.128.122:3001,http://47.243.128.122:3002,http://127.0.0.1:3001,http://127.0.0.1:3002"
+      CORS_ALLOWED_ORIGINS: "https://www.livemask-vpn.com,https://livemask-vpn.com,https://admin.livemask-vpn.com,https://api.vpn-mirrors.xyz,https://vpn-mirrors.xyz,https://api.vpn-mirrors.cfd,https://vpn-mirrors.cfd,http://47.243.128.122:64000,http://47.243.128.122:64001,http://127.0.0.1:64000,http://127.0.0.1:64001"
       SINGBOX_PUBLIC_ENDPOINT_HOST: "47.243.128.122"
-      SINGBOX_PUBLIC_ENDPOINT_PORT: "8443"
+      SINGBOX_PUBLIC_ENDPOINT_PORT: "65001"
+      SINGBOX_LISTEN_PORT: "65001"
       NODEAGENT_TLS_CERT_PATH: "/etc/livemask/hy2-tls/fullchain.pem"
       NODEAGENT_TLS_KEY_PATH: "/etc/livemask/hy2-tls/privkey.pem"
       HY2_TLS_CERT_DIR: "/etc/letsencrypt/live/api.livemask-vpn.com"
@@ -105,17 +111,19 @@ jobs:
       - name: Show current runtime port owners
         run: |
           echo "Host port mapping used by persistent dev runtime:"
-          echo "  host 18080 -> backend container 8080"
-          echo "  host 3001 -> admin container 3000"
-          echo "  host 3002 -> website container 3000"
-          echo "  host 19090 -> nodeagent container 9100"
-          echo "  host 19191 -> job-service container 19191"
+          echo "  host 64000 -> website container 3000"
+          echo "  host 64001 -> admin container 3000"
+          echo "  host 64002 -> job-service container 64002"
+          echo "  host 64003 -> backend container 8080"
+          echo "  host 65000 -> nodeagent control container 65000"
+          echo "  host 65001-65535/tcp,udp -> nodeagent VPN business port pool"
           echo "  host 15432 -> postgres container 5432"
           echo "  host 16379 -> redis container 6379"
           echo "Browser-facing dev runtime URLs:"
           echo "  backend public API: ${PUBLIC_API_BASE_URL}"
-          echo "  admin public URL:   http://${LIVEMASK_PUBLIC_HOST}:${LIVEMASK_ADMIN_PORT}"
-          echo "  website public URL: http://${LIVEMASK_PUBLIC_HOST}:${LIVEMASK_WEBSITE_PORT}"
+          echo "  admin public URL:   https://admin.livemask-vpn.com"
+          echo "  website public URL: https://www.livemask-vpn.com"
+          echo "  job public URL:     https://job.livemask-vpn.com"
           docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
 
       - name: Start persistent dev runtime
@@ -200,7 +208,7 @@ jobs:
 
           code=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
             -X OPTIONS "http://127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT}/api/v1/content/website?locale=en-US" \
-            -H "Origin: http://${LIVEMASK_PUBLIC_HOST}:${LIVEMASK_WEBSITE_PORT}" \
+            -H "Origin: https://www.livemask-vpn.com" \
             -H "Access-Control-Request-Method: GET" || echo "000")
           if [[ "${code}" != "200" && "${code}" != "204" ]]; then
             echo "FAIL: CORS preflight returned HTTP ${code}"

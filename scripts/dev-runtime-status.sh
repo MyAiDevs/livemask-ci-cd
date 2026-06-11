@@ -58,10 +58,12 @@ COMPOSE_BASENAME="$(basename "${COMPOSE_FILE}")"
 # ============================================================
 HOSTNAME="$(hostname 2>/dev/null || echo 'unknown')"
 UPTIME="$(uptime 2>/dev/null | sed 's/,.*//' || echo 'unknown')"
-BACKEND_PORT="${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
-ADMIN_PORT="${LIVEMASK_ADMIN_PORT:-3001}"
-WEBSITE_PORT="${LIVEMASK_WEBSITE_PORT:-3002}"
-JOB_PORT="${LIVEMASK_JOB_SERVICE_PORT:-19191}"
+BACKEND_PORT="${LIVEMASK_BACKEND_HTTP_PORT:-64003}"
+ADMIN_PORT="${LIVEMASK_ADMIN_PORT:-64001}"
+WEBSITE_PORT="${LIVEMASK_WEBSITE_PORT:-64000}"
+JOB_PORT="${LIVEMASK_JOB_SERVICE_PORT:-64002}"
+NODEAGENT_PORT="${LIVEMASK_NODEAGENT_PORT:-65000}"
+NODEAGENT_VPN_PORT_RANGE="${SINGBOX_PUBLIC_ENDPOINT_PORT_START:-65001}-${SINGBOX_PUBLIC_ENDPOINT_PORT_END:-65535}"
 POSTGRES_HOST_PORT="${POSTGRES_PORT:-15432}"
 REDIS_HOST_PORT="${REDIS_PORT:-16379}"
 
@@ -308,7 +310,9 @@ result = {
         'backend': '${BACKEND_PORT}->8080',
         'admin': '${ADMIN_PORT}->3000',
         'website': '${WEBSITE_PORT}->3000/5173',
-        'job-service': '${JOB_PORT}->19191',
+        'job-service': '${JOB_PORT}->64002',
+        'nodeagent': '${NODEAGENT_PORT}->65000',
+        'nodeagent-vpn': '${NODEAGENT_VPN_PORT_RANGE}->${NODEAGENT_VPN_PORT_RANGE}/tcp,udp',
         'postgres': '${POSTGRES_HOST_PORT}->5432',
         'redis': '${REDIS_HOST_PORT}->6379'
     },
