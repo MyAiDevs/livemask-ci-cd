@@ -30,11 +30,6 @@ ruby <<'RUBY'
 require "yaml"
 
 workflow_contracts = {
-  ".github/workflows/staging-smoke.yml" => {
-    "name" => "Staging Smoke",
-    "on" => ["workflow_dispatch"],
-    "jobs" => ["smoke", "notify-lark"],
-  },
   ".github/workflows/dev-runtime-deploy.yml" => {
     "name" => "Dev Runtime Deploy",
     "on" => ["push", "workflow_dispatch", "repository_dispatch"],
@@ -161,11 +156,11 @@ RUBY
 
 echo
 echo "=== Validate Docker compose configs ==="
-docker compose -f infra/docker-compose.staging.yml config >/tmp/livemask-staging-compose.yml
-env -u PUBLIC_API_BASE_URL -u STAGING_PUBLIC_API_BASE_URL docker compose -f infra/docker-compose.staging.yml config >/tmp/livemask-staging-compose-no-public-api.yml
-if grep -q "VITE_API_BASE_URL: http://127.0.0.1" /tmp/livemask-staging-compose-no-public-api.yml ||
-  grep -q "PUBLIC_API_BASE_URL: http://127.0.0.1" /tmp/livemask-staging-compose-no-public-api.yml; then
-  echo "staging compose default must not expose localhost as browser/sponsor public API" >&2
+docker compose -f infra/docker-compose.staging.yml config >/tmp/livemask-dev-compose.yml
+env -u PUBLIC_API_BASE_URL -u STAGING_PUBLIC_API_BASE_URL docker compose -f infra/docker-compose.staging.yml config >/tmp/livemask-dev-compose-no-public-api.yml
+if grep -q "VITE_API_BASE_URL: http://127.0.0.1" /tmp/livemask-dev-compose-no-public-api.yml ||
+  grep -q "PUBLIC_API_BASE_URL: http://127.0.0.1" /tmp/livemask-dev-compose-no-public-api.yml; then
+  echo "dev compose default must not expose localhost as browser/sponsor public API" >&2
   exit 1
 fi
 docker compose -f infra/docker-compose.local.yml config >/tmp/livemask-local-compose.yml

@@ -1,4 +1,4 @@
-name: ${LIVEMASK_STACK_NAME:-livemask-staging}
+name: ${LIVEMASK_STACK_NAME:-livemask-dev}
 
 services:
   postgres:
@@ -17,7 +17,7 @@ services:
       retries: 10
       start_period: 5s
     networks:
-      - livemask-staging
+      - livemask-dev
 
   redis:
     image: redis:7-alpine
@@ -31,7 +31,7 @@ services:
       retries: 10
       start_period: 5s
     networks:
-      - livemask-staging
+      - livemask-dev
 
   backend:
     build:
@@ -67,7 +67,7 @@ services:
       GEOIP_UPDATE_ENABLED: "${GEOIP_UPDATE_ENABLED:-true}"
       GEOIP_UPDATE_INTERVAL: "${GEOIP_UPDATE_INTERVAL:-24h}"
       GEOIP_DATA_DIR: "${GEOIP_DATA_DIR:-data/geoip}"
-      # Job Service admin gateway (dev/staging runtime)
+      # Job Service admin gateway (dev runtime)
       JOB_SERVICE_ENABLED: "${JOB_SERVICE_ENABLED:-true}"
       JOB_SERVICE_INTERNAL_URL: "${JOB_SERVICE_INTERNAL_URL:-http://job-service:64002}"
       JOB_SERVICE_AUTH_MODE: "${JOB_SERVICE_AUTH_MODE:-none}"
@@ -85,7 +85,7 @@ services:
       retries: 10
       start_period: 5s
     networks:
-      - livemask-staging
+      - livemask-dev
 
   admin:
     build:
@@ -100,7 +100,7 @@ services:
       BACKEND_INTERNAL_URL: "http://backend:8080"
       NEXT_TELEMETRY_DISABLED: "1"
     networks:
-      - livemask-staging
+      - livemask-dev
 
   website:
     build:
@@ -112,7 +112,7 @@ services:
     ports:
       - "${LIVEMASK_WEBSITE_PORT:-64000}:3000"
     networks:
-      - livemask-staging
+      - livemask-dev
 
   nodeagent:
     build:
@@ -152,10 +152,10 @@ services:
       HYSTERIA2_AUTH: "${HYSTERIA2_AUTH:-}"
       NODEAGENT_HYSTERIA2_AUTH: "${NODEAGENT_HYSTERIA2_AUTH:-${HYSTERIA2_AUTH:-}}"
     volumes:
-      - livemask-staging-nodeagent:/var/lib/livemask-nodeagent
+      - livemask-dev-nodeagent:/var/lib/livemask-nodeagent
       - ${HY2_TLS_CERT_DIR:-/etc/letsencrypt/live/livemask-vpn.com}:/etc/livemask/hy2-tls:ro
     networks:
-      - livemask-staging
+      - livemask-dev
 
   job-service:
     build:
@@ -168,17 +168,17 @@ services:
       JOB_SERVICE_CONFIG: "/etc/livemask/job-service.json"
       PORT: "64002"
       DB_DSN: "postgres://${POSTGRES_USER:-livemask}:${POSTGRES_PASSWORD:-livemask}@postgres:5432/${POSTGRES_DB:-livemask}?sslmode=disable"
-      JOB_SERVICE_MODE: "staging"
+      JOB_SERVICE_MODE: "dev"
       REDIS_ADDR: "redis:6379"
       JOB_SERVICE_REDIS_ENABLED: "true"
       JOB_SERVICE_INTERNAL_AUTH_ENABLED: "${JOB_SERVICE_INTERNAL_AUTH_ENABLED:-false}"
       BACKEND_INTERNAL_URL: "http://backend:8080"
     networks:
-      - livemask-staging
+      - livemask-dev
 
 networks:
-  livemask-staging:
+  livemask-dev:
     driver: bridge
 
 volumes:
-  livemask-staging-nodeagent:
+  livemask-dev-nodeagent:

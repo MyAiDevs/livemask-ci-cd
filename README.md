@@ -156,16 +156,16 @@ names; tighten required checks once each repo has stable green CI on `dev`.
 
 The local runtime is persistent by default. Do not run `stop`, `down`,
 `restart`, `docker compose down`, or process-kill cleanup unless the user
-explicitly asks for that action. Staging smoke tests must use their isolated
-staging compose stack and must not affect `livemask-local`.
+explicitly asks for that action.
 
-## Staging Smoke
+## Dev Runtime Validation
 
-The `Staging Smoke` workflow runs on the `livemask-staging` organization runner
-group. It starts `infra/docker-compose.staging.yml` and verifies the staging
-entrypoint with `scripts/smoke.sh`.
+`Staging Smoke` has been removed. Runtime validation now happens through the
+persistent `Dev Runtime Deploy` workflow after changes are merged into `dev`.
+Do not start a separate `livemask-staging-*` test stack on the public dev
+server; it can collide with the independent dev service ports.
 
-Smoke validation is **dev-only**. Do not run acceptance smoke from `task/*`,
+Validation is **dev-only**. Do not run acceptance smoke from `task/*`,
 `codex/*`, or any other feature branch. A task branch can run local/unit
 prechecks, but final CI/CD evidence must come after the task branch is merged
 into `dev`, pushed to `origin/dev`, and rebuilt from `dev`.
