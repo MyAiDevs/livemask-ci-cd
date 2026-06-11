@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="${ROOT}/.state/hy2-udp-forward.pid"
 
 if [[ "${1:-}" != "stop" ]]; then
-  echo "HY2 UDP is published by Docker Compose (${SINGBOX_LISTEN_PORT:-8443}/udp)." >&2
+  echo "HY2 TCP/UDP is published by Docker Compose (${SINGBOX_PUBLIC_ENDPOINT_PORT_START:-65001}-${SINGBOX_PUBLIC_ENDPOINT_PORT_END:-65535})." >&2
   echo "Recreate nodeagent instead:" >&2
   echo "  docker compose -f ${ROOT}/infra/docker-compose.local.yml --profile nodeagent up -d --force-recreate nodeagent" >&2
   exit 1
