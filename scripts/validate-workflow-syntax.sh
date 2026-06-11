@@ -162,7 +162,12 @@ RUBY
 echo
 echo "=== Validate Docker compose configs ==="
 docker compose -f infra/docker-compose.staging.yml config >/tmp/livemask-staging-compose.yml
-env -u PUBLIC_API_BASE_URL docker compose -f infra/docker-compose.staging.yml config >/tmp/livemask-staging-compose-no-public-api.yml
+env -u PUBLIC_API_BASE_URL -u STAGING_PUBLIC_API_BASE_URL docker compose -f infra/docker-compose.staging.yml config >/tmp/livemask-staging-compose-no-public-api.yml
+if grep -q "VITE_API_BASE_URL: http://127.0.0.1" /tmp/livemask-staging-compose-no-public-api.yml ||
+  grep -q "PUBLIC_API_BASE_URL: http://127.0.0.1" /tmp/livemask-staging-compose-no-public-api.yml; then
+  echo "staging compose default must not expose localhost as browser/sponsor public API" >&2
+  exit 1
+fi
 docker compose -f infra/docker-compose.local.yml config >/tmp/livemask-local-compose.yml
 docker compose -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml config >/tmp/livemask-local-hot-compose.yml
 
