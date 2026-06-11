@@ -39,14 +39,14 @@ services:
       dockerfile: Dockerfile.backend
     restart: unless-stopped
     ports:
-      - "${LIVEMASK_BACKEND_HTTP_PORT:-18080}:8080"
+      - "${LIVEMASK_BACKEND_HTTP_PORT:-64003}:8080"
     environment:
       PORT: "8080"
       DB_DSN: "postgres://${POSTGRES_USER:-livemask}:${POSTGRES_PASSWORD:-livemask}@postgres:5432/${POSTGRES_DB:-livemask}?sslmode=disable"
       REDIS_ADDR: "redis:6379"
       VERSION: "${BACKEND_VERSION:-0.0.0}"
       JWT_SECRET: "${JWT_SECRET:-dev-secret-key-do-not-use-in-production-32chr}"
-      CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-http://127.0.0.1:${LIVEMASK_ADMIN_PORT:-3001},http://127.0.0.1:${LIVEMASK_WEBSITE_PORT:-3002},http://localhost:${LIVEMASK_ADMIN_PORT:-3001},http://localhost:${LIVEMASK_WEBSITE_PORT:-3002}}"
+      CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-https://admin.livemask-vpn.com,https://www.livemask-vpn.com,https://livemask-vpn.com,http://127.0.0.1:${LIVEMASK_ADMIN_PORT:-64001},http://127.0.0.1:${LIVEMASK_WEBSITE_PORT:-64000}}"
       PUBLIC_PRIMARY_DOMAIN: "${PUBLIC_PRIMARY_DOMAIN:-}"
       # Dev-only seed users (optional; never set in production)
       DEV_SEED_USERS: "${DEV_SEED_USERS:-true}"
@@ -69,10 +69,10 @@ services:
       GEOIP_DATA_DIR: "${GEOIP_DATA_DIR:-data/geoip}"
       # Job Service admin gateway (dev/staging runtime)
       JOB_SERVICE_ENABLED: "${JOB_SERVICE_ENABLED:-true}"
-      JOB_SERVICE_INTERNAL_URL: "${JOB_SERVICE_INTERNAL_URL:-http://job-service:19191}"
+      JOB_SERVICE_INTERNAL_URL: "${JOB_SERVICE_INTERNAL_URL:-http://job-service:64002}"
       JOB_SERVICE_AUTH_MODE: "${JOB_SERVICE_AUTH_MODE:-none}"
       JOB_SERVICE_TIMEOUT_SEC: "${JOB_SERVICE_TIMEOUT_SEC:-30}"
-      NODEAGENT_CONTROL_URL: "${NODEAGENT_CONTROL_URL:-http://nodeagent:9100}"
+      NODEAGENT_CONTROL_URL: "${NODEAGENT_CONTROL_URL:-http://nodeagent:65000}"
       NODEAGENT_CONTROL_NODE_NAME: "${NODEAGENT_CONTROL_NODE_NAME:-local-nodeagent}"
       # Sponsor install bundle rendering (P2)
       PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:-${STAGING_PUBLIC_API_BASE_URL:-https://api.livemask-vpn.com}}"
@@ -100,7 +100,7 @@ services:
         BACKEND_INTERNAL_URL: "http://backend:8080"
     restart: unless-stopped
     ports:
-      - "${LIVEMASK_ADMIN_PORT:-3001}:3000"
+      - "${LIVEMASK_ADMIN_PORT:-64001}:3000"
     environment:
       BACKEND_INTERNAL_URL: "http://backend:8080"
       NEXT_TELEMETRY_DISABLED: "1"
@@ -118,7 +118,7 @@ services:
         VITE_API_BASE_URL: "${PUBLIC_API_BASE_URL:-${STAGING_PUBLIC_API_BASE_URL:-https://api.livemask-vpn.com}}"
     restart: unless-stopped
     ports:
-      - "${LIVEMASK_WEBSITE_PORT:-3002}:3000"
+      - "${LIVEMASK_WEBSITE_PORT:-64000}:3000"
     depends_on:
       backend:
         condition: service_started
@@ -131,8 +131,9 @@ services:
       dockerfile: Dockerfile.nodeagent
     restart: unless-stopped
     ports:
-      - "${LIVEMASK_NODEAGENT_PORT:-19090}:9100"
-      - "${SINGBOX_PUBLIC_ENDPOINT_PORT:-8443}:${SINGBOX_LISTEN_PORT:-8443}/udp"
+      - "${LIVEMASK_NODEAGENT_PORT:-65000}:${LIVEMASK_NODEAGENT_SERVICE_PORT:-65000}/tcp"
+      - "${SINGBOX_PUBLIC_ENDPOINT_PORT_START:-65001}-${SINGBOX_PUBLIC_ENDPOINT_PORT_END:-65535}:${SINGBOX_LISTEN_PORT_START:-65001}-${SINGBOX_LISTEN_PORT_END:-65535}/tcp"
+      - "${SINGBOX_PUBLIC_ENDPOINT_PORT_START:-65001}-${SINGBOX_PUBLIC_ENDPOINT_PORT_END:-65535}:${SINGBOX_LISTEN_PORT_START:-65001}-${SINGBOX_LISTEN_PORT_END:-65535}/udp"
     environment:
       BACKEND_BASE_URL: "http://backend:8080"
       BACKEND_CONFIG_URL: "http://backend:8080/internal/agent/config"
@@ -142,8 +143,8 @@ services:
       CREDENTIAL_PATH: /var/lib/livemask-nodeagent/credentials.json
       AGENT_VERSION: "${NODEAGENT_VERSION:-dev}"
       CONFIG_CACHE_PATH: /var/lib/livemask-nodeagent/runtime_config.json
-      LISTEN_ADDR: ":9100"
-      NODEAGENT_PORT: "9100"
+      LISTEN_ADDR: ":${LIVEMASK_NODEAGENT_SERVICE_PORT:-65000}"
+      NODEAGENT_PORT: "${LIVEMASK_NODEAGENT_SERVICE_PORT:-65000}"
       POLL_INTERVAL_SEC: "${POLL_INTERVAL_SEC:-30}"
       LOG_UPLOAD_ENABLED: "${LOG_UPLOAD_ENABLED:-true}"
       GEOIP_ENABLED: "${GEOIP_ENABLED:-true}"
@@ -153,7 +154,8 @@ services:
       NODEAGENT_GEOIP_FORMAT: "${NODEAGENT_GEOIP_FORMAT:-geoip2-cn-mmdb}"
       GEOIP_CHECK_INTERVAL_SEC: "${GEOIP_CHECK_INTERVAL_SEC:-300}"
       SINGBOX_PUBLIC_ENDPOINT_HOST: "${SINGBOX_PUBLIC_ENDPOINT_HOST:-}"
-      SINGBOX_PUBLIC_ENDPOINT_PORT: "${SINGBOX_PUBLIC_ENDPOINT_PORT:-8443}"
+      SINGBOX_LISTEN_PORT: "${SINGBOX_LISTEN_PORT:-65001}"
+      SINGBOX_PUBLIC_ENDPOINT_PORT: "${SINGBOX_PUBLIC_ENDPOINT_PORT:-65001}"
       NODEAGENT_TLS_CERT_PATH: "${NODEAGENT_TLS_CERT_PATH:-}"
       NODEAGENT_TLS_KEY_PATH: "${NODEAGENT_TLS_KEY_PATH:-}"
       NODE_PUBLIC_HOST_V6: "${NODE_PUBLIC_HOST_V6:-}"
@@ -175,10 +177,10 @@ services:
       dockerfile: Dockerfile.jobservice
     restart: unless-stopped
     ports:
-      - "${LIVEMASK_JOB_SERVICE_PORT:-19191}:19191"
+      - "${LIVEMASK_JOB_SERVICE_PORT:-64002}:64002"
     environment:
       JOB_SERVICE_CONFIG: "/etc/livemask/job-service.json"
-      PORT: "19191"
+      PORT: "64002"
       DB_DSN: "postgres://${POSTGRES_USER:-livemask}:${POSTGRES_PASSWORD:-livemask}@postgres:5432/${POSTGRES_DB:-livemask}?sslmode=disable"
       JOB_SERVICE_MODE: "staging"
       REDIS_ADDR: "redis:6379"
