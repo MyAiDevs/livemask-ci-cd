@@ -199,7 +199,7 @@ jobs:
       - name: Verify browser-facing dev runtime config
         run: |
           echo "Checking website bundle does not point browser clients at 127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT}"
-          if docker compose -f infra/docker-compose.staging.yml exec -T website sh -lc "grep -R \"127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT}\" -n /usr/share/nginx/html >/tmp/livemask-localhost-api.txt 2>/dev/null"; then
+          if docker compose -f infra/docker-compose.staging.yml exec -T website sh -lc "grep -R \"127.0.0.1:${LIVEMASK_BACKEND_HTTP_PORT}\" -n /app/dist >/tmp/livemask-localhost-api.txt 2>/dev/null"; then
             echo "FAIL: website bundle still contains browser-facing localhost API URL"
             docker compose -f infra/docker-compose.staging.yml exec -T website sh -lc "cat /tmp/livemask-localhost-api.txt | head -20" || true
             exit 1
