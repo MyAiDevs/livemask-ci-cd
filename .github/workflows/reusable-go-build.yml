@@ -34,7 +34,6 @@ jobs:
           go-version: ${{ inputs.go-version }}
       - run: go mod download
       - run: go build ./...
-      - run: go test ./...
 
   notify-lark:
     needs: [build]

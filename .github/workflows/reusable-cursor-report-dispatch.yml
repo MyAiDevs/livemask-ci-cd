@@ -24,7 +24,7 @@
 #         task-branch: task/TASK-CICD-FOO-001
 #         task-commit: abc123def000
 #         dev-merge-commit: abc123def789        # optional
-#         validation: "smoke PASS, go test PASS"
+#         validation: "local validation PASS"
 #         result: completed
 #         report-kind: standard                  # optional
 #       secrets:
