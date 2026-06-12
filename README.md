@@ -94,6 +94,11 @@ The guard creates a `rescue/*` branch from `origin/dev`, tests the merge on an
 `integration/*` branch, re-runs validation on `dev`, and only then pushes
 `origin/dev`.
 
+Repo defaults keep unit/integration checks local to the guard. GitHub Actions
+should not repeat those gates; CI can stay focused on build/deploy dispatch.
+For example, Backend guard validation runs unit tests, vet/build, and
+Docker-backed integration tests with temporary Postgres/Redis containers.
+
 ## Cursor Worker Continuation
 
 After a Cursor task is completed, merged to `dev`, validated, pushed, and

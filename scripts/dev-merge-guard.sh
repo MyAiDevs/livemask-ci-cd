@@ -195,9 +195,7 @@ default_validation_cmds() {
       echo "bash scripts/check-docs.sh"
       ;;
     livemask-backend)
-      echo "go test ./... -count=1"
-      echo "go vet ./..."
-      echo "go build ./..."
+      echo "bash \"${LIVEMASK_WORKSPACE_ROOT}/livemask-ci-cd/scripts/local-validate-backend.sh\" \"${repo}\""
       ;;
     livemask-admin)
       echo "npx vitest run"
@@ -208,16 +206,13 @@ default_validation_cmds() {
       echo "flutter test"
       ;;
     livemask-nodeagent)
-      echo "go test ./... -count=1"
-      echo "go build ./cmd/nodeagent"
+      echo "bash \"${LIVEMASK_WORKSPACE_ROOT}/livemask-ci-cd/scripts/local-validate-nodeagent.sh\" \"${repo}\""
       ;;
     livemask-job-service)
-      echo "go test ./... -count=1"
-      echo "go vet ./..."
-      echo "go build ./cmd/job-service"
+      echo "bash \"${LIVEMASK_WORKSPACE_ROOT}/livemask-ci-cd/scripts/local-validate-job-service.sh\" \"${repo}\""
       ;;
     livemask-ci-cd)
-      echo "bash -n scripts/*.sh"
+      echo "bash scripts/validate-workflow-syntax.sh"
       echo "git diff --check"
       ;;
     livemask-website)
