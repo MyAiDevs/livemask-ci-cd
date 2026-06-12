@@ -7,22 +7,26 @@ repo="$(cd -- "${repo}" && pwd -P)"
 export GOCACHE="${GOCACHE:-/tmp/go-build}"
 export GOMODCACHE="${GOMODCACHE:-/tmp/go-mod}"
 
-command -v go >/dev/null 2>&1 || {
+if command -v go >/dev/null 2>&1; then
+  GO_BIN="go"
+elif [[ -x "/usr/local/go/bin/go" ]]; then
+  GO_BIN="/usr/local/go/bin/go"
+else
   echo "missing required command: go" >&2
   exit 2
-}
+fi
 
 echo "[local-validate-job-service] repo=${repo}"
 cd -- "${repo}"
 
 echo "[local-validate-job-service] unit tests"
-go test ./... -count=1
+"${GO_BIN}" test ./... -count=1
 
 echo "[local-validate-job-service] sqlstore integration tests"
-go test -tags sqlstore ./... -count=1
+"${GO_BIN}" test -tags sqlstore ./... -count=1
 
 echo "[local-validate-job-service] vet"
-go vet ./...
+"${GO_BIN}" vet ./...
 
 echo "[local-validate-job-service] build"
-go build ./cmd/job-service
+"${GO_BIN}" build ./cmd/job-service

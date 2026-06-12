@@ -32,19 +32,26 @@ wait_for_postgres() {
 }
 
 need_cmd docker
-need_cmd go
+if command -v go >/dev/null 2>&1; then
+  GO_BIN="go"
+elif [[ -x "/usr/local/go/bin/go" ]]; then
+  GO_BIN="/usr/local/go/bin/go"
+else
+  echo "missing required command: go" >&2
+  exit 2
+fi
 
 echo "[local-validate-backend] repo=${repo}"
 cd -- "${repo}"
 
 echo "[local-validate-backend] unit tests"
-go test ./... -count=1
+"${GO_BIN}" test ./... -count=1
 
 echo "[local-validate-backend] vet"
-go vet ./...
+"${GO_BIN}" vet ./...
 
 echo "[local-validate-backend] build"
-go build ./...
+"${GO_BIN}" build ./...
 
 suffix="$$-$(date +%s)"
 pg_container="livemask-backend-guard-postgres-${suffix}"
@@ -72,4 +79,4 @@ redis_port="$(docker port "${redis_container}" 6379/tcp | sed -E 's/.*:([0-9]+)$
 echo "[local-validate-backend] integration tests"
 DB_DSN="postgres://postgres:postgres@127.0.0.1:${pg_port}/postgres?sslmode=disable" \
 REDIS_ADDR="127.0.0.1:${redis_port}" \
-go test -tags=integration ./... -count=1
+"${GO_BIN}" test -tags=integration ./... -count=1
