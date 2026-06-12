@@ -24,5 +24,25 @@ COPY --from=builder /src/package*.json ./
 RUN npm ci --include=dev --no-audit --no-fund
 COPY --from=builder /src/dist ./dist
 ENV NODE_ENV=production
+RUN printf '%s\n' \
+  'const splitHosts = (value) => (value || "").split(",").map((item) => item.trim()).filter(Boolean);' \
+  'const primaryDomains = splitHosts(process.env.PUBLIC_PRIMARY_DOMAIN);' \
+  'const allowedHosts = Array.from(new Set([' \
+  '  "livemask-vpn.com",' \
+  '  "www.livemask-vpn.com",' \
+  '  "localhost",' \
+  '  "127.0.0.1",' \
+  '  ...primaryDomains,' \
+  '  ...primaryDomains.map((domain) => "www." + domain),' \
+  '  ...splitHosts(process.env.VITE_PREVIEW_ALLOWED_HOSTS),' \
+  ']));' \
+  'export default {' \
+  '  preview: {' \
+  '    host: "0.0.0.0",' \
+  '    port: Number(process.env.VITE_PREVIEW_PORT || 3000),' \
+  '    allowedHosts,' \
+  '  },' \
+  '};' \
+  > /app/vite.preview.config.mjs
 EXPOSE 3000
-CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["npm", "run", "preview", "--", "--config", "/app/vite.preview.config.mjs", "--host", "0.0.0.0", "--port", "3000"]
