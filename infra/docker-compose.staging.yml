@@ -52,7 +52,7 @@ services:
       GEOIP_CREDENTIAL_ENCRYPTION_KEY: "${GEOIP_CREDENTIAL_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
       GEOIP_UPDATE_ENABLED: "${GEOIP_UPDATE_ENABLED:-true}"
       GEOIP_UPDATE_INTERVAL: "${GEOIP_UPDATE_INTERVAL:-24h}"
-      GEOIP_DATA_DIR: "${GEOIP_DATA_DIR:-data/geoip}"
+      GEOIP_DATA_DIR: "${GEOIP_DATA_DIR:-/var/lib/livemask-backend/geoip}"
       INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:-local-dev-secret}"
       # Job Service admin gateway (dev runtime)
       JOB_SERVICE_ENABLED: "${JOB_SERVICE_ENABLED:-true}"
@@ -76,6 +76,8 @@ services:
       - livemask-dev
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - livemask-backend-geoip:/var/lib/livemask-backend/geoip
 
   admin:
     build:
@@ -180,4 +182,5 @@ networks:
     driver: bridge
 
 volumes:
+  livemask-backend-geoip:
   livemask-dev-nodeagent:
