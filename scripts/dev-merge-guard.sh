@@ -4,7 +4,13 @@ set -euo pipefail
 # TASK-CICD-DEV-MERGE-GUARD-001
 # Guarded one-task-at-a-time merge flow for LiveMask repositories.
 
-LIVEMASK_WORKSPACE_ROOT="${LIVEMASK_WORKSPACE_ROOT:-$HOME/Developer/LiveMask}"
+if [[ -z "${LIVEMASK_WORKSPACE_ROOT:-}" ]]; then
+  if [[ -d "/data/Livemask" ]]; then
+    LIVEMASK_WORKSPACE_ROOT="/data/Livemask"
+  else
+    LIVEMASK_WORKSPACE_ROOT="$HOME/Developer/LiveMask"
+  fi
+fi
 
 usage() {
   cat <<'EOF'
