@@ -144,8 +144,6 @@ services:
       SINGBOX_LISTEN_HOST: "${SINGBOX_LISTEN_HOST:-0.0.0.0}"
       SINGBOX_TRANSPORT: "${SINGBOX_TRANSPORT:-udp}"
       SINGBOX_PROTOCOL_PROFILE: "${SINGBOX_PROTOCOL_PROFILE:-hysteria2}"
-      # LAN IP/hostname phones use to reach this node (must match connect_node_endpoints).
-      SINGBOX_PUBLIC_ENDPOINT_HOST: "${SINGBOX_PUBLIC_ENDPOINT_HOST:-192.168.1.64}"
       # Required when protocol_profile=hysteria2 (static fallback auth; per-session auth layered on top).
       HYSTERIA2_AUTH: "${HYSTERIA2_AUTH:-local-dev-hy2-auth}"
       NODEAGENT_TLS_CERT_PATH: "${NODEAGENT_TLS_CERT_PATH:-/workspace/.state/dev-hy2-tls/cert.pem}"
