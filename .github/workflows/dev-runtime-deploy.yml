@@ -56,7 +56,6 @@ jobs:
       PUBLIC_API_BASE_URL: "https://api.livemask-vpn.com"
       PUBLIC_PRIMARY_DOMAIN: "livemask-vpn.com"
       CORS_ALLOWED_ORIGINS: "https://www.livemask-vpn.com,https://livemask-vpn.com,https://admin.livemask-vpn.com,https://api.vpn-mirrors.xyz,https://vpn-mirrors.xyz,https://api.vpn-mirrors.cfd,https://vpn-mirrors.cfd,http://47.243.128.122:64000,http://47.243.128.122:64001,http://127.0.0.1:64000,http://127.0.0.1:64001"
-      SINGBOX_PUBLIC_ENDPOINT_HOST: "47.243.128.122"
       NODEAGENT_TLS_CERT_PATH: "/etc/livemask/hy2-tls/fullchain.pem"
       NODEAGENT_TLS_KEY_PATH: "/etc/livemask/hy2-tls/privkey.pem"
       HY2_TLS_CERT_DIR: "/etc/letsencrypt/live/api.livemask-vpn.com"
@@ -181,7 +180,9 @@ jobs:
             local url="$2"
             local code=""
             for attempt in $(seq 1 30); do
-              code=$(curl -sS --max-time 3 -o /dev/null -w "%{http_code}" "${url}" 2>/dev/null || echo "000")
+              if ! code=$(curl -sS --max-time 3 -o /dev/null -w "%{http_code}" "${url}" 2>/dev/null); then
+                code="000"
+              fi
               case "${code}" in
                 200|301|302|307|308)
                   echo "${name} reachable: HTTP ${code} (${url})"

@@ -153,7 +153,9 @@ wait_http() {
   local attempt
 
   for attempt in $(seq 1 45); do
-    code="$(curl -sS --max-time 3 -o /tmp/livemask-deploy-service-${name}.out -w "%{http_code}" "${url}" 2>/dev/null || echo "000")"
+    if ! code="$(curl -sS --max-time 3 -o /tmp/livemask-deploy-service-${name}.out -w "%{http_code}" "${url}" 2>/dev/null)"; then
+      code="000"
+    fi
     if [[ "${code}" =~ ${ok_pattern} ]]; then
       echo "[deploy-service] ${name} healthy: HTTP ${code} (${url})"
       return 0
@@ -169,8 +171,48 @@ wait_http() {
   return 1
 }
 
+build_context_dir_for_service() {
+  case "$1" in
+    backend) echo "backend" ;;
+    admin) echo "admin" ;;
+    website) echo "website" ;;
+    job-service) echo "job-service" ;;
+    nodeagent) echo "nodeagent" ;;
+    *) return 1 ;;
+  esac
+}
+
+print_build_context_ref() {
+  local service="$1"
+  local dir_name=""
+  local context_dir=""
+  local ref=""
+  local latest_file=""
+
+  dir_name="$(build_context_dir_for_service "${service}")" || return 0
+  context_dir="${REPO_ROOT}/infra/_build_deps/${dir_name}"
+
+  if [[ ! -d "${context_dir}" ]]; then
+    echo "[deploy-service] build context for ${service}: missing (${context_dir})"
+    return 0
+  fi
+
+  if ref="$(git -C "${context_dir}" rev-parse --short HEAD 2>/dev/null)"; then
+    echo "[deploy-service] build context for ${service}: git ${ref} (${context_dir})"
+    return 0
+  fi
+
+  latest_file="$(find "${context_dir}" -type f \( -name go.mod -o -name package.json -o -name main.go \) -printf '%T@ %TY-%Tm-%TdT%TH:%TM:%TS %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2- || true)"
+  if [[ -n "${latest_file}" ]]; then
+    echo "[deploy-service] build context for ${service}: no git metadata, newest source ${latest_file}"
+  else
+    echo "[deploy-service] build context for ${service}: no git metadata and no source marker found (${context_dir})"
+  fi
+}
+
 deploy_one() {
   local service="$1"
+  print_build_context_ref "${service}"
   echo "[deploy-service] deploying ${service} with --no-deps"
   compose up -d --build --no-deps "${service}"
 }
