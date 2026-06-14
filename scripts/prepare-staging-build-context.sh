@@ -41,6 +41,23 @@ job-service|livemask-job-service
 nodeagent|livemask-nodeagent
 "
 
+required_ci_files() {
+  case "$1" in
+    backend)
+      printf '%s\n' "go.mod"
+      ;;
+    admin|website)
+      printf '%s\n' "package.json"
+      ;;
+    job-service)
+      printf '%s\n' "go.mod"
+      ;;
+    nodeagent)
+      printf '%s\n' "go.mod" "scripts/install-singbox.sh" "docker/entrypoint.sh"
+      ;;
+  esac
+}
+
 # ============================================================
 # Parse args
 # ============================================================
@@ -78,14 +95,24 @@ printf "%s" "${REPO_ROWS}" | while IFS='|' read -r dir_name repo_name; do
 
   if [[ "${CI_MODE}" == "true" ]]; then
     # CI mode: actions/checkout placed source files.
-    # If go.mod exists, the checkout succeeded — just ensure .exists.
-    # If not, create .exists as a stub (but workflow should have checked out).
+    # Fail closed if checkout did not place the expected source files. Creating
+    # stubs in CI hides broken checkout paths and later produces misleading
+    # Docker build errors.
     mkdir -p "${target}"
-    if [[ -f "${target}/go.mod" || -f "${target}/package.json" ]]; then
-      echo "[prepare]  [CI] ${target} — source from checkout found"
-    else
-      echo "[prepare]  [CI] ${target} — no go.mod/package.json (checkout may be missing), creating stub"
+    missing=()
+    while IFS= read -r required_file; do
+      [[ -z "${required_file}" ]] && continue
+      if [[ ! -f "${target}/${required_file}" ]]; then
+        missing+=("${required_file}")
+      fi
+    done < <(required_ci_files "${dir_name}")
+    if [[ "${#missing[@]}" -gt 0 ]]; then
+      echo "ERROR: CI build context for ${repo_name} is incomplete at ${target}" >&2
+      printf '  missing: %s\n' "${missing[@]}" >&2
+      echo "Verify actions/checkout path and ref before running docker compose build." >&2
+      exit 2
     fi
+    echo "[prepare]  [CI] ${target} — source from checkout found"
     touch "${target}/.exists"
     continue
   fi
