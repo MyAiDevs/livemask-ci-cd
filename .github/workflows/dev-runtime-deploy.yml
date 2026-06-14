@@ -61,6 +61,7 @@ jobs:
       HY2_TLS_CERT_DIR: "/etc/letsencrypt/live/api.livemask-vpn.com"
       GEOIP_UPDATE_ENABLED: "true"
       HYSTERIA2_AUTH: "DevHy2Pass-change-me"
+      EXTERNAL_NODEAGENT_HOSTS: "root@61.200.88.68"
       DEPLOY_SERVICE: ${{ github.event.inputs.service || github.event.client_payload.service || 'all' }}
     runs-on:
       group: livemask-staging
@@ -150,6 +151,12 @@ jobs:
             --service "${DEPLOY_SERVICE}" \
             --compose infra/docker-compose.staging.yml \
             --start-deps
+
+      - name: Deploy external NodeAgent hosts
+        if: ${{ env.DEPLOY_SERVICE == 'all' || env.DEPLOY_SERVICE == 'nodeagent' }}
+        run: |
+          bash scripts/deploy-external-nodeagents.sh \
+            --source infra/_build_deps/nodeagent
 
       - name: Seed dev test data
         if: ${{ env.DEPLOY_SERVICE == 'backend' || env.DEPLOY_SERVICE == 'all' }}
