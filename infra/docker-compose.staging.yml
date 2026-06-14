@@ -40,12 +40,16 @@ services:
     restart: unless-stopped
     ports:
       - "${LIVEMASK_BACKEND_HTTP_PORT:-64003}:8080"
+      - "${LIVEMASK_BACKEND_NODEAGENT_TLS_PORT:-64004}:${NODEAGENT_BACKEND_TLS_PORT:-8443}"
     environment:
       PORT: "8080"
       DB_DSN: "${DB_DSN:-postgres://${POSTGRES_USER:-livemask}:${POSTGRES_PASSWORD:-livemask}@host.docker.internal:${POSTGRES_PORT:-15432}/${POSTGRES_DB:-livemask}?sslmode=disable}"
       REDIS_ADDR: "${REDIS_ADDR:-host.docker.internal:${REDIS_PORT:-16379}}"
       VERSION: "${BACKEND_VERSION:-0.0.0}"
       JWT_SECRET: "${JWT_SECRET:-dev-secret-key-do-not-use-in-production-32chr}"
+      NODEAGENT_BACKEND_TLS_PORT: "${NODEAGENT_BACKEND_TLS_PORT:-8443}"
+      NODEAGENT_BACKEND_TLS_CERT_PATH: "${NODEAGENT_BACKEND_TLS_CERT_PATH:-data/cert/backend.cert.pem}"
+      NODEAGENT_BACKEND_TLS_KEY_PATH: "${NODEAGENT_BACKEND_TLS_KEY_PATH:-data/cert/backend.key.pem}"
       CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-https://admin.livemask-vpn.com,https://www.livemask-vpn.com,https://livemask-vpn.com,http://127.0.0.1:${LIVEMASK_ADMIN_PORT:-64001},http://127.0.0.1:${LIVEMASK_WEBSITE_PORT:-64000}}"
       PUBLIC_PRIMARY_DOMAIN: "${PUBLIC_PRIMARY_DOMAIN:-}"
       # GeoIP credential encryption (dev-only; production uses a real key)
@@ -124,8 +128,8 @@ services:
       - "${SINGBOX_PUBLIC_ENDPOINT_PORT_START:-65001}-${SINGBOX_PUBLIC_ENDPOINT_PORT_END:-65535}:${SINGBOX_LISTEN_PORT_START:-65001}-${SINGBOX_LISTEN_PORT_END:-65535}/tcp"
       - "${SINGBOX_PUBLIC_ENDPOINT_PORT_START:-65001}-${SINGBOX_PUBLIC_ENDPOINT_PORT_END:-65535}:${SINGBOX_LISTEN_PORT_START:-65001}-${SINGBOX_LISTEN_PORT_END:-65535}/udp"
     environment:
-      BACKEND_BASE_URL: "${NODEAGENT_BACKEND_BASE_URL:-${PUBLIC_API_BASE_URL:-${STAGING_PUBLIC_API_BASE_URL:-https://api.livemask-vpn.com}}}"
-      NODEAGENT_BACKEND_URL: "${NODEAGENT_BACKEND_BASE_URL:-${PUBLIC_API_BASE_URL:-${STAGING_PUBLIC_API_BASE_URL:-https://api.livemask-vpn.com}}}"
+      BACKEND_BASE_URL: "${NODEAGENT_BACKEND_BASE_URL:-https://host.docker.internal:${LIVEMASK_BACKEND_NODEAGENT_TLS_PORT:-64004}}"
+      NODEAGENT_BACKEND_URL: "${NODEAGENT_BACKEND_BASE_URL:-https://host.docker.internal:${LIVEMASK_BACKEND_NODEAGENT_TLS_PORT:-64004}}"
       NODE_COUNTRY_CODE: "${NODE_COUNTRY_CODE:-US}"
       IDENTITY_PATH: /var/lib/livemask-nodeagent/identity.json
       CREDENTIAL_PATH: /var/lib/livemask-nodeagent/credentials.json
