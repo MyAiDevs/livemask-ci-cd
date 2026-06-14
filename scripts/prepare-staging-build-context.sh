@@ -31,6 +31,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKSPACE_ROOT="${LIVEMASK_WORKSPACE_ROOT:-$HOME/Developer/LiveMask}"
 BUILD_DEPS="${REPO_ROOT}/infra/_build_deps"
 CI_MODE=false
+DEPLOY_SERVICE_FILTER="${DEPLOY_SERVICE:-all}"
 
 # Map rows: build-dest dir | workspace repo name
 REPO_ROWS="
@@ -54,6 +55,28 @@ required_ci_files() {
       ;;
     nodeagent)
       printf '%s\n' "go.mod" "scripts/install-singbox.sh" "docker/entrypoint.sh"
+      ;;
+  esac
+}
+
+should_prepare_dir() {
+  local dir_name="$1"
+  case "${DEPLOY_SERVICE_FILTER}" in
+    all|"")
+      return 0
+      ;;
+    backend|admin|website|nodeagent)
+      [[ "${dir_name}" == "${DEPLOY_SERVICE_FILTER}" ]]
+      return
+      ;;
+    job-service|job_service|jobservice)
+      [[ "${dir_name}" == "job-service" ]]
+      return
+      ;;
+    *)
+      echo "ERROR: unknown DEPLOY_SERVICE=${DEPLOY_SERVICE_FILTER}" >&2
+      echo "Expected one of: all, backend, admin, website, job-service, nodeagent" >&2
+      exit 2
       ;;
   esac
 }
@@ -87,10 +110,15 @@ done
 # ============================================================
 
 echo "[prepare] Preparing staging build context at: ${BUILD_DEPS}"
+echo "[prepare] Deploy service filter: ${DEPLOY_SERVICE_FILTER}"
 mkdir -p "${BUILD_DEPS}"
 
 printf "%s" "${REPO_ROWS}" | while IFS='|' read -r dir_name repo_name; do
   [[ -z "${dir_name}" ]] && continue
+  if ! should_prepare_dir "${dir_name}"; then
+    echo "[prepare]  [skip] ${repo_name} — not required for DEPLOY_SERVICE=${DEPLOY_SERVICE_FILTER}"
+    continue
+  fi
   target="${BUILD_DEPS}/${dir_name}"
 
   if [[ "${CI_MODE}" == "true" ]]; then
