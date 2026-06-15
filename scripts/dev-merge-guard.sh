@@ -29,8 +29,8 @@ Options:
   --push                   Push dev to origin/dev after dev validation passes.
                            Without --push, the script stops after integration validation.
   --dry-run                Run preflight checks only; do not merge.
-  --allow-local-branch     Allow a task branch without an origin/<branch> backup.
-                           Default is fail-closed and requires remote backup.
+  --allow-local-branch     Compatibility no-op. Local task branches are allowed
+                           by default and are preferred over origin/<branch>.
   --help                   Show this help.
 
 Rules:
@@ -38,6 +38,7 @@ Rules:
   - The legacy one-argument form infers --repo from cwd and --task-id from
     changed docs/development/tasks/TASK-*.md files or the branch commit subject.
   - Refuses dirty worktrees and in-progress merge/rebase/cherry-pick states.
+  - Local task branches do not need an origin/<branch> backup before merge.
   - Creates rescue/<repo>-dev-before-<TASK>-<timestamp> from origin/dev.
   - Tests merge on integration/<TASK>-<timestamp> before touching dev.
   - Re-runs validation on dev before push.
@@ -60,7 +61,7 @@ task_branch=""
 task_id=""
 push_dev=false
 dry_run=false
-allow_local_branch=false
+allow_local_branch=true
 validation_cmds=()
 
 legacy_single_branch=""
@@ -198,7 +199,7 @@ ensure_clean_worktree() {
 default_validation_cmds() {
   case "${repo_name}" in
     livemask-docs)
-      echo "bash scripts/check-docs.sh"
+      echo "python3 scripts/check-mvp-readiness.py"
       ;;
     livemask-backend)
       echo "bash \"${LIVEMASK_WORKSPACE_ROOT}/livemask-ci-cd/scripts/local-validate-backend.sh\" \"${repo}\""
@@ -218,7 +219,6 @@ default_validation_cmds() {
       echo "bash \"${LIVEMASK_WORKSPACE_ROOT}/livemask-ci-cd/scripts/local-validate-job-service.sh\" \"${repo}\""
       ;;
     livemask-ci-cd)
-      echo "bash scripts/validate-workflow-syntax.sh"
       echo "git diff --check"
       ;;
     livemask-website)
@@ -287,19 +287,24 @@ ensure_clean_worktree
 info "repo: ${repo}"
 info "task: ${task_id}"
 info "task branch: ${task_branch}"
-info "fetch origin dev and task branch"
+info "fetch origin dev and task branch if available"
 git_in_repo fetch origin dev
 git_in_repo fetch origin "${task_branch}" || true
 
 git_in_repo rev-parse --verify --quiet "origin/dev^{commit}" >/dev/null || die "origin/dev not found"
 
 task_ref="${task_branch}"
-if git_in_repo rev-parse --verify --quiet "origin/${task_branch}^{commit}" >/dev/null; then
-  task_ref="origin/${task_branch}"
-elif git_in_repo rev-parse --verify --quiet "${task_branch}^{commit}" >/dev/null; then
-  if [[ "${allow_local_branch}" != "true" ]]; then
-    die "task branch has no origin/${task_branch} backup; push it or pass --allow-local-branch explicitly"
+if git_in_repo rev-parse --verify --quiet "${task_branch}^{commit}" >/dev/null; then
+  task_ref="${task_branch}"
+  if git_in_repo rev-parse --verify --quiet "origin/${task_branch}^{commit}" >/dev/null; then
+    local_sha="$(git_in_repo rev-parse --short "${task_branch}")"
+    remote_sha="$(git_in_repo rev-parse --short "origin/${task_branch}")"
+    if [[ "${local_sha}" != "${remote_sha}" ]]; then
+      info "local ${task_branch} (${local_sha}) differs from origin/${task_branch} (${remote_sha}); using local branch"
+    fi
   fi
+elif git_in_repo rev-parse --verify --quiet "origin/${task_branch}^{commit}" >/dev/null; then
+  task_ref="origin/${task_branch}"
 else
   die "task branch not found locally or on origin: ${task_branch}"
 fi

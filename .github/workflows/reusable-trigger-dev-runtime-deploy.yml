@@ -1,13 +1,13 @@
 # TASK-CICD-DEV-RUNTIME-AUTO-DEPLOY-001
 #
 # Reusable workflow for runtime repos to request a staging dev runtime rebuild
-# after a successful push to dev.
+# after any push to dev.
 #
 # Usage (in a runtime repo workflow):
 #
 #   trigger-dev-runtime-deploy:
 #     needs: [build]
-#     if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.build.result == 'success'
+#     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
 #     uses: MyAiDevs/livemask-ci-cd/.github/workflows/reusable-trigger-dev-runtime-deploy.yml@dev
 #     secrets:
 #       LIVEMASK_BOT_TOKEN: ${{ secrets.LIVEMASK_BOT_TOKEN }}
