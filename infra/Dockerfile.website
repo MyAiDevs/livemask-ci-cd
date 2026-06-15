@@ -12,7 +12,7 @@ RUN if [ ! -f /src/package.json ]; then \
     fi
 
 WORKDIR /src
-ARG VITE_API_BASE_URL=http://127.0.0.1:18080
+ARG VITE_API_BASE_URL=https://api.livemask-vpn.com
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 RUN npm ci
 RUN npm run build
