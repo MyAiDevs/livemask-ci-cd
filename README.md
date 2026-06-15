@@ -40,6 +40,12 @@ Hot reload behavior:
 - Does **not** run `docker compose down`, delete volumes, pull branches, or
   mutate task state
 
+Admin and Website local containers default to the public API
+`https://api.livemask-vpn.com`, so they can be run as frontend-only hot-reload
+services without starting the local Backend. Override `BACKEND_INTERNAL_URL`,
+`VITE_API_BASE_URL`, and `VITE_PROXY_TARGET` when you intentionally want to
+test against the local Backend container.
+
 Manual compose (equivalent to default hot reload):
 
 ```bash
