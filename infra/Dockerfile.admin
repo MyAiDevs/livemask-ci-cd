@@ -12,7 +12,7 @@ RUN if [ ! -f /src/package.json ]; then \
     fi
 
 WORKDIR /src
-ARG BACKEND_INTERNAL_URL=http://backend:8080
+ARG BACKEND_INTERNAL_URL=https://api.livemask-vpn.com
 ENV BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL}
 RUN npm ci
 RUN npm run build
@@ -26,7 +26,7 @@ RUN mkdir -p /out/public && \
 FROM node:22-alpine
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-ARG BACKEND_INTERNAL_URL=http://backend:8080
+ARG BACKEND_INTERNAL_URL=https://api.livemask-vpn.com
 ENV BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL}
 WORKDIR /app
 COPY --from=builder /out/package*.json ./
