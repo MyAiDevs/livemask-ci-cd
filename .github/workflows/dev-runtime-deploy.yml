@@ -18,6 +18,7 @@ on:
           - website
           - job-service
           - nodeagent
+          - status-only
   repository_dispatch:
     types:
       - dev-runtime-deploy
@@ -70,6 +71,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
+          fetch-depth: 2
 
       - name: Record deploy trigger
         run: |
@@ -78,6 +80,36 @@ jobs:
           echo "source_sha=${{ github.event.client_payload.sha || github.sha }}"
           echo "source_ref=${{ github.event.client_payload.ref || 'dev' }}"
           echo "deploy_service=${DEPLOY_SERVICE}"
+
+      - name: Resolve deploy scope
+        run: |
+          requested="${DEPLOY_SERVICE:-all}"
+          resolved="${requested}"
+
+          if [[ "${{ github.event_name }}" == "push" && "${requested}" == "all" ]]; then
+            changed_files="$(git diff --name-only HEAD^ HEAD 2>/dev/null || git show --name-only --format= HEAD)"
+            echo "Changed files:"
+            printf '%s\n' "${changed_files}"
+
+            if printf '%s\n' "${changed_files}" | grep -Eq '^(infra/docker-compose\.staging\.yml|scripts/prepare-staging-build-context\.sh)$'; then
+              resolved="all"
+            elif printf '%s\n' "${changed_files}" | grep -Eq '^(infra/Dockerfile\.backend)$'; then
+              resolved="backend"
+            elif printf '%s\n' "${changed_files}" | grep -Eq '^(infra/Dockerfile\.jobservice)$'; then
+              resolved="job-service"
+            elif printf '%s\n' "${changed_files}" | grep -Eq '^(infra/Dockerfile\.admin)$'; then
+              resolved="admin"
+            elif printf '%s\n' "${changed_files}" | grep -Eq '^(infra/Dockerfile\.website)$'; then
+              resolved="website"
+            elif printf '%s\n' "${changed_files}" | grep -Eq '^(infra/Dockerfile\.nodeagent|scripts/deploy-external-nodeagents\.sh|templates/sponsor/nodeagent-install\.sh\.tpl)$'; then
+              resolved="nodeagent"
+            else
+              resolved="status-only"
+            fi
+          fi
+
+          echo "resolved_deploy_service=${resolved}"
+          echo "DEPLOY_SERVICE=${resolved}" >> "${GITHUB_ENV}"
 
       - name: Checkout backend source into build context
         if: ${{ env.DEPLOY_SERVICE == 'all' || env.DEPLOY_SERVICE == 'backend' }}
@@ -125,6 +157,7 @@ jobs:
           token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
 
       - name: Prepare dev runtime build context
+        if: ${{ env.DEPLOY_SERVICE != 'status-only' }}
         run: bash scripts/prepare-staging-build-context.sh --ci
 
       - name: Show current runtime port owners
@@ -143,9 +176,10 @@ jobs:
           echo "  admin public URL:   https://admin.livemask-vpn.com"
           echo "  website public URL: https://www.livemask-vpn.com"
           echo "  job public URL:     https://job.livemask-vpn.com"
-          docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
+          docker ps --format 'table {{.Names}}\t{{.Status}}' || true
 
       - name: Deploy requested service independently
+        if: ${{ env.DEPLOY_SERVICE != 'status-only' }}
         run: |
           bash scripts/deploy-service.sh \
             --service "${DEPLOY_SERVICE}" \
