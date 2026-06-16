@@ -43,6 +43,9 @@ Rules:
   - Tests merge on integration/<TASK>-<timestamp> before touching dev.
   - Re-runs validation on dev before push.
   - After a pushed merge, switches local checkout to dev and pulls origin/dev.
+  - After a pushed merge, best-effort syncs the matching local Docker service.
+    Admin/Website sync clears frontend framework caches before recreating the
+    local container, so browser checks use the long-lived Docker runtime.
   - Never force-pushes and never merges task branches directly into main.
 EOF
 }
@@ -124,16 +127,25 @@ done
 [[ "${task_branch}" != *","* && "${task_branch}" != *" "* ]] || die "batch branch lists are forbidden; merge one task branch at a time"
 [[ "${task_branch}" != "dev" && "${task_branch}" != "main" ]] || die "refusing to merge protected branch '${task_branch}' as a task branch"
 
+is_git_worktree() {
+  local candidate="$1"
+  git -C "${candidate}" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
 repo="$(cd -- "${repo}" && pwd -P)" 2>/dev/null || true
-# If resolved path doesn't have .git, try alternative root-relative path
-if [[ ! -d "${repo}/.git" ]]; then
+# If resolved path is not a Git worktree, try alternative root-relative path.
+# Linked worktrees have a .git file instead of a .git directory, so use
+# git's own repository detection instead of checking the filesystem shape.
+if [[ -z "${repo}" || ! -d "${repo}" ]] || ! is_git_worktree "${repo}"; then
     alt="${LIVEMASK_WORKSPACE_ROOT}/${repo}"
     alt="$(cd -- "${alt}" 2>/dev/null && pwd -P || true)"
-    if [[ -n "${alt}" && -d "${alt}/.git" ]]; then
+    if [[ -n "${alt}" && -d "${alt}" ]] && is_git_worktree "${alt}"; then
         repo="${alt}"
     fi
 fi
-[[ -d "${repo}/.git" ]] || die "not a git repository: ${repo}"
+if [[ -z "${repo}" || ! -d "${repo}" ]] || ! is_git_worktree "${repo}"; then
+  die "not a git repository: ${repo}"
+fi
 
 git_in_repo() {
   git -C "${repo}" "$@"
@@ -173,7 +185,21 @@ fi
 [[ -n "${task_id}" ]] || die "--task-id is required"
 [[ "${task_id}" =~ ^TASK-[A-Za-z0-9]+(-[A-Za-z0-9]+)*$ ]] || die "--task-id must look like TASK-XXXX"
 
-repo_name="$(basename "${repo}")"
+infer_repo_name() {
+  local name
+  local remote_url
+
+  name="$(basename "${repo}")"
+  remote_url="$(git_in_repo config --get remote.origin.url 2>/dev/null || true)"
+  if [[ -n "${remote_url}" ]]; then
+    remote_url="${remote_url%.git}"
+    name="${remote_url##*/}"
+  fi
+
+  echo "${name}"
+}
+
+repo_name="$(infer_repo_name)"
 timestamp="$(date +%Y%m%d%H%M%S)"
 safe_task_id="$(echo "${task_id}" | tr '[:upper:]' '[:lower:]')"
 safe_branch="$(echo "${task_branch}" | tr '/:@ ' '----' | tr -cd 'A-Za-z0-9._-')"
@@ -264,11 +290,17 @@ refresh_local_dev_after_push() {
 
 maybe_sync_local_runtime() {
   local sync_script="${LIVEMASK_WORKSPACE_ROOT}/livemask-ci-cd/scripts/local-dev.sh"
+  local sync_args=(sync --changed-repo "${repo}" --auto --no-pull)
   if [[ ! -x "${sync_script}" ]]; then
     return 0
   fi
+  case "${repo_name}" in
+    livemask-admin|livemask-website)
+      sync_args+=(--clear-cache)
+      ;;
+  esac
   info "best-effort local runtime sync for ${repo_name}"
-  if bash "${sync_script}" sync --changed-repo "${repo}" --auto --no-pull; then
+  if bash "${sync_script}" "${sync_args[@]}"; then
     info "local runtime sync completed for ${repo_name}"
   else
     info "local runtime sync skipped or unavailable (non-fatal)"
@@ -280,6 +312,7 @@ if [[ "${#validation_cmds[@]}" -eq 0 ]]; then
     validation_cmds+=("${cmd}")
   done < <(default_validation_cmds)
 fi
+[[ "${#validation_cmds[@]}" -gt 0 ]] || die "no validation commands resolved for ${repo_name}; pass --validation-cmd"
 
 ensure_no_operation_in_progress
 ensure_clean_worktree
