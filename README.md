@@ -40,10 +40,11 @@ Hot reload behavior:
 - Does **not** run `docker compose down`, delete volumes, pull branches, or
   mutate task state
 
-Admin local containers default to the source-mounted local Backend
-`http://backend:8080`, so `http://127.0.0.1:3001/login` exercises the same
-local stack as Backend. Override `BACKEND_INTERNAL_URL` only when intentionally
-running Admin as a frontend-only shell against another API.
+Admin and Website local containers default to the shared dev API
+`https://api.livemask-vpn.com`, so `http://127.0.0.1:3001` and
+`http://127.0.0.1:3002` show real dev data during frontend validation.
+Override `BACKEND_INTERNAL_URL`, `VITE_API_BASE_URL`, or `VITE_PROXY_TARGET`
+only when intentionally testing against the source-mounted local Backend.
 
 Website can still be pointed at a chosen API with `VITE_API_BASE_URL` and
 `VITE_PROXY_TARGET` when you intentionally want frontend-only hot reload or a
@@ -163,10 +164,11 @@ ports above.
 
 Each runtime service can be recreated independently. The dev compose file does
 not use service-level `depends_on` between Backend, Admin, Website, Job Service,
-and NodeAgent. Runtime services default to stable host-port endpoints such as
-`http://host.docker.internal:64003` instead of Docker service DNS such as
-`http://backend:8080`, so a single service restart does not require unrelated
-application containers to be on the same compose network.
+and NodeAgent. Frontend services default to the shared dev API for real data;
+backend-facing services use stable host-port endpoints such as
+`http://host.docker.internal:64003` instead of Docker service DNS, so a single
+service restart does not require unrelated application containers to be on the
+same compose network.
 
 On the public runtime host, enable either `livemask-dev` or
 `livemask-stage`/`livemask-staging`, not both. `deploy-service.sh` enforces this
