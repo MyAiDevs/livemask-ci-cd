@@ -68,7 +68,7 @@ POSTGRES_HOST_PORT="${POSTGRES_PORT:-15432}"
 REDIS_HOST_PORT="${REDIS_PORT:-16379}"
 
 # ============================================================
-# 1. Container status via docker compose ps
+# 1. Container status via Docker labels
 # ============================================================
 CONTAINER_JSON="[]"
 CONTAINER_SUMMARY=""
@@ -78,37 +78,51 @@ COMPOSE_UP_DETECTED=false
 
 if docker info &>/dev/null; then
   COMPOSE_PROJECT="livemask-${ENV_TYPE}"
-  # Detect if compose file exists
-  if [[ -f "${COMPOSE_FILE}" ]]; then
-    # Check if any containers are running
-    PS_OUTPUT=$(docker compose -f "${COMPOSE_FILE}" ps --format json 2>/dev/null || true)
-    if [[ -n "${PS_OUTPUT}" ]]; then
-      CONTAINER_JSON="["
-      first=true
-      while IFS= read -r line; do
-        if [[ -z "$line" ]]; then continue; fi
-        $first || CONTAINER_JSON+=","
-        first=false
-        CONTAINER_JSON+="$line"
+  # Avoid `docker compose ps --format json`: NodeAgent exposes a very large
+  # TCP/UDP port range, and compose JSON status can hang while expanding it.
+  PS_OUTPUT=$(
+    docker ps -a \
+      --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
+      --format '{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Label "com.docker.compose.service"}}' \
+      2>/dev/null || true
+  )
+  if [[ -n "${PS_OUTPUT}" ]]; then
+    CONTAINER_JSON=$(
+      printf '%s\n' "${PS_OUTPUT}" | python3 -c '
+import json
+import sys
 
-        # Parse individual container status
-        name=$(echo "$line" | python3 -c "import sys,json; print(json.load(sys.stdin).get('Name',''))" 2>/dev/null || echo "")
-        state=$(echo "$line" | python3 -c "import sys,json; print(json.load(sys.stdin).get('State',''))" 2>/dev/null || echo "")
-        status=$(echo "$line" | python3 -c "import sys,json; print(json.load(sys.stdin).get('Status',''))" 2>/dev/null || echo "")
+containers = []
+for raw in sys.stdin:
+    raw = raw.rstrip("\n")
+    if not raw:
+        continue
+    parts = raw.split("\t", 3)
+    while len(parts) < 4:
+        parts.append("")
+    name, state, status, service = parts
+    containers.append({
+        "Name": name,
+        "Service": service,
+        "State": state,
+        "Status": status,
+    })
+print(json.dumps(containers))
+'
+    )
 
-        if [[ "${state}" != "running" ]]; then
-          ALL_CONTAINERS_UP=false
-          FAILED_CONTAINERS+="${name} (${state}: ${status})\n"
-        fi
-      done <<< "$PS_OUTPUT"
-      CONTAINER_JSON+="]"
+    COMPOSE_UP_DETECTED=true
+    RUNNING_COUNT=$(echo "${CONTAINER_JSON}" | python3 -c "import sys,json; print(sum(1 for c in json.load(sys.stdin) if c.get('State') == 'running'))" 2>/dev/null || echo 0)
+    TOTAL_COUNT=$(echo "${CONTAINER_JSON}" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
+    CONTAINER_SUMMARY="${RUNNING_COUNT}/${TOTAL_COUNT} running"
 
-      COMPOSE_UP_DETECTED=true
-      # Summary line
-      RUNNING_COUNT=$(docker compose -f "${COMPOSE_FILE}" ps --filter "status=running" --format json 2>/dev/null | python3 -c "import sys,json; lines=[l for l in sys.stdin if l.strip()]; print(len(lines))" 2>/dev/null || echo 0)
-      TOTAL_COUNT=$(echo "$CONTAINER_JSON" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
-      CONTAINER_SUMMARY="${RUNNING_COUNT}/${TOTAL_COUNT} running"
-    fi
+    while IFS=$'\t' read -r name state status service; do
+      if [[ -z "${name}" ]]; then continue; fi
+      if [[ "${state}" != "running" ]]; then
+        ALL_CONTAINERS_UP=false
+        FAILED_CONTAINERS+="${name} (${state}: ${status})\n"
+      fi
+    done <<< "${PS_OUTPUT}"
   fi
 fi
 
@@ -275,8 +289,8 @@ if [[ -n "${FAILED_CONTAINERS}" ]]; then
   while IFS= read -r fail_entry; do
     if [[ -z "$fail_entry" ]]; then continue; fi
     container_name=$(echo "$fail_entry" | cut -d' ' -f1)
-    if docker inspect "${container_name}" &>/dev/null; then
-      log_snippet=$(docker logs "${container_name}" --tail 30 2>&1 | head -30 || true)
+    if timeout 5 docker inspect "${container_name}" &>/dev/null; then
+      log_snippet=$(timeout 10 docker logs "${container_name}" --tail 30 2>&1 | head -30 || true)
       if [[ -n "${log_snippet}" ]]; then
         ERROR_EXCERPTS+="--- ${container_name} logs (last 30) ---\n${log_snippet}\n"
       fi
