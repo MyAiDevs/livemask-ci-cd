@@ -40,11 +40,14 @@ Hot reload behavior:
 - Does **not** run `docker compose down`, delete volumes, pull branches, or
   mutate task state
 
-Admin and Website local containers default to the public API
-`https://api.livemask-vpn.com`, so they can be run as frontend-only hot-reload
-services without starting the local Backend. Override `BACKEND_INTERNAL_URL`,
-`VITE_API_BASE_URL`, and `VITE_PROXY_TARGET` when you intentionally want to
-test against the local Backend container.
+Admin local containers default to the source-mounted local Backend
+`http://backend:8080`, so `http://127.0.0.1:3001/login` exercises the same
+local stack as Backend. Override `BACKEND_INTERNAL_URL` only when intentionally
+running Admin as a frontend-only shell against another API.
+
+Website can still be pointed at a chosen API with `VITE_API_BASE_URL` and
+`VITE_PROXY_TARGET` when you intentionally want frontend-only hot reload or a
+specific Backend target.
 
 Manual compose (equivalent to default hot reload):
 
@@ -70,86 +73,27 @@ LIVEMASK_LOCAL_HOT_RELOAD=false bash scripts/local-dev.sh start
 `livemask-app` is not managed by Docker. Use the local Flutter SDK for app
 build/run refresh.
 
-## Dev Merge Guard
+## Development Flow
 
-All completed task branches must be merged into `dev` through the guarded merge
-script. Do not run ad hoc batch merges such as `for branch in task/*; do git
-merge ...; done`.
+The old task-branch, ledger, lease, Cursor continuation, completion-evidence,
+and issue-close guard automation has been removed. New work follows the current
+MVP plan and AI editor rules in `livemask-docs`.
 
-Example:
+Recommended flow:
 
-```bash
-bash scripts/dev-merge-guard.sh \
-  --repo ../livemask-admin \
-  --task-branch task/TASK-ADMIN-EXAMPLE-001 \
-  --task-id TASK-ADMIN-EXAMPLE-001 \
-  --push
-```
+1. Start from `dev` and create a local `task/*` branch for the work.
+2. Make the code/doc change locally on that task branch.
+3. Run focused repo tests or smoke checks.
+4. Merge the task branch into local `dev` with `scripts/dev-merge-guard.sh`.
+5. Push `dev` through `scripts/dev-merge-guard.sh --push`.
 
-The guard is fail-closed:
+Local branches do not need to be pushed to GitHub before merge. A push to
+`dev` is enough for the dev runtime automation to rebuild and redeploy the
+affected service.
 
-- dirty worktree: stop
-- merge/rebase/cherry-pick in progress: stop
-- missing `origin/dev`: stop
-- task branch without remote backup: stop
-- merge conflict: abort merge and stop
-- validation failure: stop before push
-- no `--push`: stop after integration validation
-
-The guard creates a `rescue/*` branch from `origin/dev`, tests the merge on an
-`integration/*` branch, re-runs validation on `dev`, and only then pushes
-`origin/dev`.
-
-Repo defaults keep unit/integration checks local to the guard. GitHub Actions
-should not repeat those gates; CI can stay focused on build/deploy dispatch.
-For example, Backend guard validation runs unit tests, vet/build, and
-Docker-backed integration tests with temporary Postgres/Redis containers.
-
-## Cursor Worker Continuation
-
-After a Cursor task is completed, merged to `dev`, validated, pushed, and
-reported to `livemask-docs`, a worker may ask for the next docs-assigned task
-with:
-
-```bash
-bash scripts/accept-next-task.sh \
-  --repo livemask-backend \
-  --previous-task-id TASK-BACKEND-EXAMPLE-001
-```
-
-The script is fail-closed. It refuses to continue when the local worktree is
-dirty, the previous task report is not confirmed by docs, the repo assignment
-does not match, the lease expired, the task is marked manual-only, the worker
-chain/runtime limit is reached, or docs cannot be fetched within the retry
-budget.
-
-By default, the worker waits up to 30 minutes for a docs assignment. If no
-eligible task is received before that timeout, it stops with exit code `10` and
-prints a `Cursor worker stop report` containing the repo, docs source, waited
-seconds, timeout seconds, total repo tasks, and blocked-task reasons.
-
-Exit codes are part of the automation contract:
-
-| Code | Meaning |
-| --- | --- |
-| `0` | next task accepted; read the generated brief |
-| `10` | no eligible task for this repo |
-| `20` | local chain/runtime guard blocked continuation |
-| `30` | dirty worktree |
-| `40` | repo/task mismatch |
-| `50` | previous report is pending or not accepted |
-| `60` | validation guard failed |
-| `70` | docs fetch timeout |
-| `80` | lease expired |
-| `90` | manual dispatch required |
-| `100` | script/config error |
-
-Runtime repos can call
-`.github/workflows/reusable-cursor-worker-continuation.yml` to reuse the same
-guard logic and upload the generated brief/state artifact. The workflow reports
-safe stop outcomes (`idle_no_task`, `blocked`, `report_pending`, `lease_expired`,
-`manual_required`) as successful workflow outcomes so the caller can decide
-whether to keep or stop the Cursor window without creating noisy failed checks.
+Completed task work must not stop at local validation. The task branch must be
+merged into `dev` and `origin/dev` must be pushed through
+`scripts/dev-merge-guard.sh --push`.
 
 ## Branch Protection
 
