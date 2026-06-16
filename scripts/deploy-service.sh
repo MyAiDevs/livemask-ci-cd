@@ -27,6 +27,11 @@ Options:
 This script performs targeted service deployment only. It never runs
 `docker compose down`, never deletes volumes, and never recreates unrelated
 application services.
+
+Admin and Website are frontend services. Their dev-runtime deploy path clears
+safe build-context artifacts and uses `docker compose build --no-cache` before
+recreating the target service, so stale Next.js/Vite bundles cannot survive a
+dev push through Docker layer reuse.
 EOF
 }
 
@@ -145,6 +150,13 @@ compose() {
   docker compose -f "${COMPOSE_FILE}" "$@"
 }
 
+is_frontend_service() {
+  case "$1" in
+    admin|website) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 wait_http() {
   local name="$1"
   local url="$2"
@@ -210,11 +222,51 @@ print_build_context_ref() {
   fi
 }
 
+clear_frontend_build_context_cache() {
+  local service="$1"
+  local dir_name=""
+  local context_dir=""
+  local paths=()
+
+  dir_name="$(build_context_dir_for_service "${service}")" || return 0
+  context_dir="${REPO_ROOT}/infra/_build_deps/${dir_name}"
+  [[ -d "${context_dir}" ]] || return 0
+
+  case "${service}" in
+    admin)
+      paths=(.next .turbo node_modules/.cache node_modules/.vite)
+      ;;
+    website)
+      paths=(dist .vite .turbo node_modules/.cache node_modules/.vite)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  echo "[deploy-service] clearing frontend build-context cache for ${service}"
+  for path in "${paths[@]}"; do
+    if [[ -e "${context_dir}/${path}" ]]; then
+      echo "[deploy-service]   rm -rf infra/_build_deps/${dir_name}/${path}"
+      rm -rf "${context_dir:?}/${path}"
+    fi
+  done
+}
+
 deploy_one() {
   local service="$1"
   print_build_context_ref "${service}"
-  echo "[deploy-service] deploying ${service} with --no-deps"
-  compose up -d --build --no-deps "${service}"
+  if is_frontend_service "${service}"; then
+    clear_frontend_build_context_cache "${service}"
+    echo "[deploy-service] building ${service} with --no-cache"
+    compose build --no-cache "${service}"
+    echo "[deploy-service] deploying ${service} with --no-build --no-deps --force-recreate"
+    compose up -d --no-build --no-deps --force-recreate "${service}"
+    return 0
+  fi
+
+  echo "[deploy-service] deploying ${service} with --build --no-deps --force-recreate"
+  compose up -d --build --no-deps --force-recreate "${service}"
 }
 
 health_one() {
