@@ -265,6 +265,13 @@ deploy_one() {
     return 0
   fi
 
+  if [[ "${service}" == "nodeagent" ]]; then
+    echo "[deploy-service] deploying ${service} with --build --no-deps"
+    echo "[deploy-service] nodeagent is not force-recreated because it owns the large VPN port pool"
+    compose up -d --build --no-deps "${service}"
+    return 0
+  fi
+
   echo "[deploy-service] deploying ${service} with --build --no-deps --force-recreate"
   compose up -d --build --no-deps --force-recreate "${service}"
 }
