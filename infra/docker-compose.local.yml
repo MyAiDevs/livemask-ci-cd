@@ -50,7 +50,7 @@ services:
       GEOIP_CREDENTIAL_ENCRYPTION_KEY: "${GEOIP_CREDENTIAL_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
       GEOIP_UPDATE_ENABLED: "${GEOIP_UPDATE_ENABLED:-true}"
       GEOIP_UPDATE_INTERVAL: "${GEOIP_UPDATE_INTERVAL:-24h}"
-      GEOIP_DATA_DIR: "${GEOIP_DATA_DIR:-/var/lib/livemask-backend/geoip}"
+      GEOIP_DATA_DIR: "${GEOIP_DATA_DIR:-data/geoip}"
       INTERNAL_SERVICE_SECRET: "${INTERNAL_SERVICE_SECRET:-local-dev-secret}"
       # Job Service gateway
       JOB_SERVICE_ENABLED: "${JOB_SERVICE_ENABLED:-true}"
@@ -69,7 +69,7 @@ services:
     volumes:
       - ${LIVEMASK_WORKSPACE_ROOT:-/Users/sammytan/Developer/LiveMask}/livemask-backend:/workspace/livemask-backend
       - livemask-local-go-cache:/workspace/.cache
-      - livemask-local-backend-geoip:/var/lib/livemask-backend/geoip
+      - livemask-local-backend-geoip:/workspace/livemask-backend/data/geoip
     depends_on:
       postgres:
         condition: service_healthy
