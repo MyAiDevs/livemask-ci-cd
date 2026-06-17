@@ -1,9 +1,6 @@
 name: Dev Runtime Deploy
 
 on:
-  push:
-    branches:
-      - dev
   workflow_dispatch:
     inputs:
       service:
@@ -63,7 +60,7 @@ jobs:
       GEOIP_UPDATE_ENABLED: "true"
       HYSTERIA2_AUTH: "DevHy2Pass-change-me"
       EXTERNAL_NODEAGENT_HOSTS: "root@61.200.88.68"
-      DEPLOY_SERVICE: ${{ github.event.inputs.service || github.event.client_payload.service || 'all' }}
+      DEPLOY_SERVICE: ${{ github.event.inputs.service || github.event.client_payload.service || 'status-only' }}
     runs-on:
       group: livemask-staging
       labels: [self-hosted, Linux, livemask, docker, staging]
@@ -83,30 +80,17 @@ jobs:
 
       - name: Resolve deploy scope
         run: |
-          requested="${DEPLOY_SERVICE:-all}"
+          requested="${DEPLOY_SERVICE:-status-only}"
           resolved="${requested}"
 
-          if [[ "${{ github.event_name }}" == "push" && "${requested}" == "all" ]]; then
-            changed_files="$(git diff --name-only HEAD^ HEAD 2>/dev/null || git show --name-only --format= HEAD)"
-            echo "Changed files:"
-            printf '%s\n' "${changed_files}"
-
-            if printf '%s\n' "${changed_files}" | grep -Eq '^(infra/docker-compose\.staging\.yml|scripts/prepare-staging-build-context\.sh)$'; then
-              resolved="all"
-            elif printf '%s\n' "${changed_files}" | grep -Eq '^(infra/Dockerfile\.backend)$'; then
-              resolved="backend"
-            elif printf '%s\n' "${changed_files}" | grep -Eq '^(infra/Dockerfile\.jobservice)$'; then
-              resolved="job-service"
-            elif printf '%s\n' "${changed_files}" | grep -Eq '^(infra/Dockerfile\.admin)$'; then
-              resolved="admin"
-            elif printf '%s\n' "${changed_files}" | grep -Eq '^(infra/Dockerfile\.website)$'; then
-              resolved="website"
-            elif printf '%s\n' "${changed_files}" | grep -Eq '^(infra/Dockerfile\.nodeagent|scripts/deploy-external-nodeagents\.sh|templates/sponsor/nodeagent-install\.sh\.tpl)$'; then
-              resolved="nodeagent"
-            else
-              resolved="status-only"
-            fi
-          fi
+          case "${resolved}" in
+            status-only|backend|admin|website|job-service|nodeagent|all) ;;
+            *)
+              echo "ERROR: unsupported deploy service '${resolved}'" >&2
+              echo "Expected one of: status-only, backend, admin, website, job-service, nodeagent, all" >&2
+              exit 2
+              ;;
+          esac
 
           echo "resolved_deploy_service=${resolved}"
           echo "DEPLOY_SERVICE=${resolved}" >> "${GITHUB_ENV}"
