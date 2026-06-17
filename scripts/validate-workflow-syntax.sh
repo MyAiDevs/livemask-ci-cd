@@ -32,7 +32,7 @@ require "yaml"
 workflow_contracts = {
   ".github/workflows/dev-runtime-deploy.yml" => {
     "name" => "Dev Runtime Deploy",
-    "on" => ["push", "workflow_dispatch", "repository_dispatch"],
+    "on" => ["workflow_dispatch", "repository_dispatch"],
     "jobs" => ["deploy", "notify-lark"],
   },
   ".github/workflows/reusable-trigger-dev-runtime-deploy.yml" => {
