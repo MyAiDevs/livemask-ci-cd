@@ -122,16 +122,57 @@ docker run -d \
   ${RUN_ARGS} \
   "${IMAGE}"
 
+probe_ok=0
 for i in $(seq 1 45); do
   if wget -qO- "http://127.0.0.1:65000/app/probe" >/tmp/livemask-nodeagent-probe.json 2>/dev/null; then
     cat /tmp/livemask-nodeagent-probe.json
-    exit 0
+    probe_ok=1
+    break
   fi
   sleep 2
 done
 
-docker logs --tail 120 "${CONTAINER}" >&2 || true
-exit 1
+if [ "${probe_ok}" != "1" ]; then
+  docker logs --tail 120 "${CONTAINER}" >&2 || true
+  exit 1
+fi
+
+geoip_enabled="$(awk -F= '
+  $1 == "NODEAGENT_GEOIP_ENABLED" { value=$2 }
+  $1 == "GEOIP_ENABLED" && value == "" { value=$2 }
+  END { print value }
+' "${env_file}" | tr '[:upper:]' '[:lower:]')"
+
+if [ "${geoip_enabled}" = "true" ]; then
+  control_token="$(awk -F= '$1 == "NODEAGENT_CONTROL_TOKEN" { print $2; exit }' "${env_file}")"
+  if [ -z "${control_token}" ]; then
+    echo "[external-nodeagent] GeoIP is enabled but NODEAGENT_CONTROL_TOKEN is missing; cannot verify /geoip/status" >&2
+    docker logs --tail 120 "${CONTAINER}" >&2 || true
+    exit 1
+  fi
+
+  geoip_ok=0
+  for i in $(seq 1 60); do
+    if wget -qO- --header "Authorization: Bearer ${control_token}" \
+      "http://127.0.0.1:65000/geoip/status" >/tmp/livemask-nodeagent-geoip.json 2>/dev/null; then
+      cat /tmp/livemask-nodeagent-geoip.json
+      if grep -Eq '"status"[[:space:]]*:[[:space:]]*"ready"' /tmp/livemask-nodeagent-geoip.json ||
+        grep -Eq '"lkg_available"[[:space:]]*:[[:space:]]*true' /tmp/livemask-nodeagent-geoip.json; then
+        geoip_ok=1
+        break
+      fi
+    fi
+    sleep 2
+  done
+
+  if [ "${geoip_ok}" != "1" ]; then
+    echo "[external-nodeagent] GeoIP status did not become ready and no LKG is available" >&2
+    docker logs --tail 160 "${CONTAINER}" >&2 || true
+    exit 1
+  fi
+fi
+
+exit 0
 REMOTE
 }
 
