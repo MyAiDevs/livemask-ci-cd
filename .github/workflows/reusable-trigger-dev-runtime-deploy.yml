@@ -42,7 +42,7 @@ jobs:
           client-payload: >-
             {
               "source_repo": "${{ github.repository }}",
-              "service": "${{ inputs.service || (github.repository == 'MyAiDevs/livemask-backend' && 'backend' || github.repository == 'MyAiDevs/livemask-admin' && 'admin' || github.repository == 'MyAiDevs/livemask-website' && 'website' || github.repository == 'MyAiDevs/livemask-job-service' && 'job-service' || github.repository == 'MyAiDevs/livemask-nodeagent' && 'nodeagent' || 'all') }}",
+              "service": "${{ inputs.service || (github.repository == 'MyAiDevs/livemask-backend' && 'backend' || github.repository == 'MyAiDevs/livemask-admin' && 'admin' || github.repository == 'MyAiDevs/livemask-website' && 'website' || github.repository == 'MyAiDevs/livemask-job-service' && 'job-service' || github.repository == 'MyAiDevs/livemask-nodeagent' && 'nodeagent' || 'status-only') }}",
               "ref": "${{ github.ref_name }}",
               "sha": "${{ github.sha }}",
               "workflow": "${{ github.workflow }}",
