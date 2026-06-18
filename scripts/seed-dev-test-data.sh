@@ -72,6 +72,49 @@ ON CONFLICT DO NOTHING;
 SQL
 }
 
+seed_nodeagent_release() {
+  local version="$1"
+  local version_sql
+
+  version_sql="$(sql_escape "${version}")"
+  if [[ -z "${version_sql}" ]]; then
+    return 0
+  fi
+
+  pg_exec <<SQL
+INSERT INTO nodeagent_releases (
+  version, platform, arch, channel, artifact_url, sha256,
+  min_config_schema, max_config_schema, status, release_notes, created_by,
+  published_at
+)
+VALUES (
+  '${version_sql}',
+  'linux',
+  'amd64',
+  'dev',
+  'https://dev.livemask-vpn.com/nodeagent/${version_sql}/nodeagent-linux-amd64.tar.gz',
+  '0000000000000000000000000000000000000000000000000000000000000000',
+  '1.0',
+  '9.9',
+  'published',
+  'DEV compatibility seed for protocol assignment version checks.',
+  'seed-dev-test-data.sh',
+  NOW()
+)
+ON CONFLICT (version, platform, arch) DO UPDATE
+SET channel = 'dev',
+    artifact_url = EXCLUDED.artifact_url,
+    sha256 = EXCLUDED.sha256,
+    min_config_schema = EXCLUDED.min_config_schema,
+    max_config_schema = EXCLUDED.max_config_schema,
+    status = 'published',
+    release_notes = EXCLUDED.release_notes,
+    created_by = EXCLUDED.created_by,
+    published_at = COALESCE(nodeagent_releases.published_at, NOW()),
+    revoked_at = NULL;
+SQL
+}
+
 echo "[seed-dev-test-data] seeding dev users"
 seed_user "${DEV_ADMIN_EMAIL:-admin@livemask.dev}" "${DEV_ADMIN_PASSWORD:-AdminPass123!}" "Dev Admin" admin
 seed_user "${DEV_SPONSOR_EMAIL:-sponsor@livemask.dev}" "${DEV_SPONSOR_PASSWORD:-SponsorPass123!}" "Dev Sponsor Ambassador" user sponsor_ambassador
@@ -146,5 +189,11 @@ SET plan_id = EXCLUDED.plan_id,
     cancel_at_period_end = FALSE,
     updated_at = NOW();
 SQL
+
+echo "[seed-dev-test-data] seeding dev NodeAgent release compatibility labels"
+dev_nodeagent_versions="${DEV_NODEAGENT_RELEASE_VERSIONS:-dev dev-prod-docker}"
+for dev_nodeagent_version in ${dev_nodeagent_versions}; do
+  seed_nodeagent_release "${dev_nodeagent_version}"
+done
 
 echo "[seed-dev-test-data] complete"
