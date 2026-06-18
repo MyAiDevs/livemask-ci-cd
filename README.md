@@ -45,6 +45,8 @@ Admin and Website local containers default to the shared dev API
 `http://127.0.0.1:3002` show real dev data during frontend validation.
 Override `BACKEND_INTERNAL_URL`, `VITE_API_BASE_URL`, or `VITE_PROXY_TARGET`
 only when intentionally testing against the source-mounted local Backend.
+If an existing Admin container still reports backend unavailable, recreate the
+Admin service; Docker keeps the old container environment until recreate.
 
 Website can still be pointed at a chosen API with `VITE_API_BASE_URL` and
 `VITE_PROXY_TARGET` when you intentionally want frontend-only hot reload or a
