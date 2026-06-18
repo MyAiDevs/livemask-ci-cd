@@ -1,0 +1,112 @@
+name: ${MAILU_COMPOSE_PROJECT:-livemask-mailu}
+
+x-mailu-env: &mailu-env
+  env_file:
+    - ${MAILU_ENV_FILE:-./mailu.env}
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/redis:/data"
+    networks:
+      - mailu
+
+  front:
+    image: ${MAILU_IMAGE_REGISTRY:-ghcr.io/mailu}/nginx:${MAILU_VERSION:-2024.06}
+    restart: unless-stopped
+    <<: *mailu-env
+    ports:
+      - "${MAILU_HTTP_PORT:-80}:80"
+      - "${MAILU_HTTPS_PORT:-443}:443"
+      - "${MAILU_SMTP_PORT:-25}:25"
+      - "${MAILU_SUBMISSION_PORT:-587}:587"
+      - "${MAILU_SUBMISSIONS_PORT:-465}:465"
+      - "${MAILU_IMAP_PORT:-143}:143"
+      - "${MAILU_IMAPS_PORT:-993}:993"
+      - "${MAILU_POP3_PORT:-110}:110"
+      - "${MAILU_POP3S_PORT:-995}:995"
+      - "${MAILU_SIEVE_PORT:-4190}:4190"
+    volumes:
+      - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/certs:/certs"
+      - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/overrides/nginx:/overrides:ro"
+    depends_on:
+      - admin
+      - imap
+      - smtp
+      - webmail
+    networks:
+      - mailu
+
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile.mailu-admin
+      args:
+        MAILU_VERSION: ${MAILU_VERSION:-2024.06}
+        MAILU_IMAGE_REGISTRY: ${MAILU_IMAGE_REGISTRY:-ghcr.io/mailu}
+    restart: unless-stopped
+    <<: *mailu-env
+    volumes:
+      - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/data:/data"
+      - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/dkim:/dkim"
+    depends_on:
+      - redis
+    networks:
+      - mailu
+
+  imap:
+    image: ${MAILU_IMAGE_REGISTRY:-ghcr.io/mailu}/dovecot:${MAILU_VERSION:-2024.06}
+    restart: unless-stopped
+    <<: *mailu-env
+    volumes:
+      - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/mail:/mail"
+      - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/overrides/dovecot:/overrides:ro"
+    depends_on:
+      - admin
+    networks:
+      - mailu
+
+  smtp:
+    image: ${MAILU_IMAGE_REGISTRY:-ghcr.io/mailu}/postfix:${MAILU_VERSION:-2024.06}
+    restart: unless-stopped
+    <<: *mailu-env
+    volumes:
+      - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/mailqueue:/queue"
+      - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/overrides/postfix:/overrides:ro"
+    depends_on:
+      - admin
+    networks:
+      - mailu
+
+  antispam:
+    image: ${MAILU_IMAGE_REGISTRY:-ghcr.io/mailu}/rspamd:${MAILU_VERSION:-2024.06}
+    restart: unless-stopped
+    <<: *mailu-env
+    volumes:
+      - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/filter:/var/lib/rspamd"
+      - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/dkim:/dkim"
+      - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/overrides/rspamd:/overrides:ro"
+    depends_on:
+      - admin
+    networks:
+      - mailu
+
+  webmail:
+    image: ${MAILU_IMAGE_REGISTRY:-ghcr.io/mailu}/webmail:${MAILU_VERSION:-2024.06}
+    restart: unless-stopped
+    <<: *mailu-env
+    volumes:
+      - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/webmail:/data"
+    depends_on:
+      - imap
+    networks:
+      - mailu
+
+networks:
+  mailu:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${SUBNET:-192.168.203.0/24}
