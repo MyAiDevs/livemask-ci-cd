@@ -70,6 +70,7 @@ services:
       # Sponsor install bundle rendering (P2)
       PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:-${STAGING_PUBLIC_API_BASE_URL:-https://api.livemask-vpn.com}}"
       NODEAGENT_IMAGE: "${NODEAGENT_IMAGE:-ghcr.io/myaidevs/livemask-nodeagent:dev}"
+      NODEAGENT_IMAGE_SOURCES: "${NODEAGENT_IMAGE_SOURCES:-ghcr.io/myaidevs/livemask-nodeagent:dev docker.io/myaidevs/livemask-nodeagent:dev registry.cn-hongkong.aliyuncs.com/livemask/livemask-nodeagent:dev}"
       NODEAGENT_DEFAULT_VERSION: "${NODEAGENT_DEFAULT_VERSION:-${NODEAGENT_VERSION:-dev}}"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
