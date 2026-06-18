@@ -195,6 +195,15 @@ The GitHub `Dev Runtime Deploy` workflow also accepts a `service` input
 (`all`, `backend`, `admin`, `website`, `job-service`, `nodeagent`). Repository
 dispatch callers can pass the same value as `client_payload.service`.
 
+NodeAgent public image distribution uses three ordered sources by default:
+GHCR, Docker Hub, and Aliyun ACR Hong Kong. The `NodeAgent Image Publish`
+workflow builds the same `infra/Dockerfile.nodeagent` artifact for all three
+tags. Pushing requires `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`,
+`ALIYUN_ACR_USERNAME`, and `ALIYUN_ACR_PASSWORD` repository secrets; GHCR uses
+the GitHub token. Runtime Backend receives the same ordered list through
+`NODEAGENT_IMAGE_SOURCES`, so sponsor install bundles and published images stay
+on one contract.
+
 Backend and Job Service still need reachable PostgreSQL/Redis at runtime.
 Admin, Website, and NodeAgent still need their configured Backend/API endpoint
 reachable at runtime.

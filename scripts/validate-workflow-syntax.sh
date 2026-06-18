@@ -60,6 +60,11 @@ workflow_contracts = {
     "on" => ["workflow_dispatch"],
     "jobs" => ["build-aar"],
   },
+  ".github/workflows/nodeagent-image-publish.yml" => {
+    "name" => "NodeAgent Image Publish",
+    "on" => ["workflow_dispatch", "repository_dispatch"],
+    "jobs" => ["publish"],
+  },
   ".github/workflows/ci-runner-diagnostics.yml" => {
     "name" => "CI Runner Diagnostics",
     "on" => ["workflow_dispatch"],

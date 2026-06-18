@@ -1,0 +1,130 @@
+name: NodeAgent Image Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      nodeagent_ref:
+        description: "livemask-nodeagent ref to publish"
+        required: false
+        default: "dev"
+      image_tag:
+        description: "Image tag to publish"
+        required: false
+        default: "dev"
+      push:
+        description: "Push images to registries"
+        required: false
+        type: boolean
+        default: false
+  repository_dispatch:
+    types:
+      - nodeagent-image-publish
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      NODEAGENT_REF: ${{ github.event.client_payload.nodeagent_ref || inputs.nodeagent_ref || 'dev' }}
+      IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag || 'dev' }}
+      PUSH_REQUEST: ${{ github.event.client_payload.push || inputs.push || 'false' }}
+      GHCR_IMAGE: ghcr.io/myaidevs/livemask-nodeagent
+      DOCKERHUB_IMAGE: docker.io/myaidevs/livemask-nodeagent
+      ALIYUN_ACR_IMAGE: registry.cn-hongkong.aliyuncs.com/livemask/livemask-nodeagent
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      ALIYUN_ACR_USERNAME: ${{ secrets.ALIYUN_ACR_USERNAME }}
+      ALIYUN_ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout NodeAgent source
+        uses: actions/checkout@v4
+        with:
+          repository: MyAiDevs/livemask-nodeagent
+          ref: ${{ env.NODEAGENT_REF }}
+          path: infra/_build_deps/nodeagent
+          token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Resolve image sources
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          push="${PUSH_REQUEST}"
+          case "${push}" in
+            true|True|TRUE|1|yes|YES) push="true" ;;
+            *) push="false" ;;
+          esac
+
+          tags=(
+            "${GHCR_IMAGE}:${IMAGE_TAG}"
+            "${DOCKERHUB_IMAGE}:${IMAGE_TAG}"
+            "${ALIYUN_ACR_IMAGE}:${IMAGE_TAG}"
+          )
+
+          if [[ "${push}" == "true" ]]; then
+            [[ -n "${DOCKERHUB_USERNAME}" && -n "${DOCKERHUB_TOKEN}" ]] || {
+              echo "DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are required when push=true" >&2
+              exit 2
+            }
+            [[ -n "${ALIYUN_ACR_USERNAME}" && -n "${ALIYUN_ACR_PASSWORD}" ]] || {
+              echo "ALIYUN_ACR_USERNAME and ALIYUN_ACR_PASSWORD are required when push=true" >&2
+              exit 2
+            }
+          fi
+
+          {
+            echo "tags<<EOF"
+            printf '%s\n' "${tags[@]}"
+            echo "EOF"
+            echo "push=${push}"
+            echo "sources=$(IFS=,; echo "${tags[*]}")"
+          } >> "${GITHUB_OUTPUT}"
+
+          printf 'NodeAgent image sources:\n'
+          printf '  %s\n' "${tags[@]}"
+
+      - uses: docker/login-action@v3
+        if: ${{ steps.meta.outputs.push == 'true' }}
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/login-action@v3
+        if: ${{ steps.meta.outputs.push == 'true' }}
+        with:
+          registry: docker.io
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - uses: docker/login-action@v3
+        if: ${{ steps.meta.outputs.push == 'true' }}
+        with:
+          registry: registry.cn-hongkong.aliyuncs.com
+          username: ${{ env.ALIYUN_ACR_USERNAME }}
+          password: ${{ env.ALIYUN_ACR_PASSWORD }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/Dockerfile.nodeagent
+          push: ${{ steps.meta.outputs.push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+
+      - name: Publish contract summary
+        run: |
+          {
+            echo "### NodeAgent image publish contract"
+            echo
+            echo "- NodeAgent ref: \`${NODEAGENT_REF}\`"
+            echo "- Image tag: \`${IMAGE_TAG}\`"
+            echo "- Push enabled: \`${{ steps.meta.outputs.push }}\`"
+            echo "- Sources: \`${{ steps.meta.outputs.sources }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
