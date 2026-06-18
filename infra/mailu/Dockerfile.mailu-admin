@@ -1,0 +1,7 @@
+ARG MAILU_VERSION=2024.06
+ARG MAILU_IMAGE_REGISTRY=ghcr.io/mailu
+
+FROM ${MAILU_IMAGE_REGISTRY}/admin:${MAILU_VERSION}
+
+LABEL org.opencontainers.image.title="LiveMask Mailu Admin CLI"
+LABEL org.opencontainers.image.description="Thin wrapper around the official Mailu admin image for LiveMask mailbox seeding and smoke operations."
