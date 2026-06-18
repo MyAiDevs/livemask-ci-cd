@@ -1,9 +1,5 @@
 name: ${MAILU_COMPOSE_PROJECT:-livemask-mailu}
 
-x-mailu-env: &mailu-env
-  env_file:
-    - ${MAILU_ENV_FILE:-./mailu.env}
-
 services:
   redis:
     image: redis:7-alpine
@@ -16,7 +12,8 @@ services:
   front:
     image: ${MAILU_IMAGE_REGISTRY:-ghcr.io/mailu}/nginx:${MAILU_VERSION:-2024.06}
     restart: unless-stopped
-    <<: *mailu-env
+    env_file:
+      - ${MAILU_ENV_FILE:-./mailu.env}
     ports:
       - "${MAILU_HTTP_PORT:-80}:80"
       - "${MAILU_HTTPS_PORT:-443}:443"
@@ -47,7 +44,8 @@ services:
         MAILU_VERSION: ${MAILU_VERSION:-2024.06}
         MAILU_IMAGE_REGISTRY: ${MAILU_IMAGE_REGISTRY:-ghcr.io/mailu}
     restart: unless-stopped
-    <<: *mailu-env
+    env_file:
+      - ${MAILU_ENV_FILE:-./mailu.env}
     volumes:
       - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/data:/data"
       - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/dkim:/dkim"
@@ -59,7 +57,8 @@ services:
   imap:
     image: ${MAILU_IMAGE_REGISTRY:-ghcr.io/mailu}/dovecot:${MAILU_VERSION:-2024.06}
     restart: unless-stopped
-    <<: *mailu-env
+    env_file:
+      - ${MAILU_ENV_FILE:-./mailu.env}
     volumes:
       - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/mail:/mail"
       - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/overrides/dovecot:/overrides:ro"
@@ -71,7 +70,8 @@ services:
   smtp:
     image: ${MAILU_IMAGE_REGISTRY:-ghcr.io/mailu}/postfix:${MAILU_VERSION:-2024.06}
     restart: unless-stopped
-    <<: *mailu-env
+    env_file:
+      - ${MAILU_ENV_FILE:-./mailu.env}
     volumes:
       - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/mailqueue:/queue"
       - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/overrides/postfix:/overrides:ro"
@@ -83,7 +83,8 @@ services:
   antispam:
     image: ${MAILU_IMAGE_REGISTRY:-ghcr.io/mailu}/rspamd:${MAILU_VERSION:-2024.06}
     restart: unless-stopped
-    <<: *mailu-env
+    env_file:
+      - ${MAILU_ENV_FILE:-./mailu.env}
     volumes:
       - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/filter:/var/lib/rspamd"
       - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/dkim:/dkim"
@@ -96,7 +97,8 @@ services:
   webmail:
     image: ${MAILU_IMAGE_REGISTRY:-ghcr.io/mailu}/webmail:${MAILU_VERSION:-2024.06}
     restart: unless-stopped
-    <<: *mailu-env
+    env_file:
+      - ${MAILU_ENV_FILE:-./mailu.env}
     volumes:
       - "${MAILU_DATA_DIR:-/opt/livemask-mailu/data}/webmail:/data"
     depends_on:
