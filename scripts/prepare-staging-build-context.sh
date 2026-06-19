@@ -233,6 +233,7 @@ printf "%s" "${REPO_ROWS}" | while IFS='|' read -r dir_name repo_name; do
     # Do not rm -rf the target first: local Docker builds may have left
     # root-owned cache directories under infra/_build_deps.
     copy_workspace_source "${ws_repo}" "${target}" "${repo_name}"
+    rm -f "${target}/.no-source"
     verify_build_context "${dir_name}" "${repo_name}" "${target}"
     touch "${target}/.exists"
   else
