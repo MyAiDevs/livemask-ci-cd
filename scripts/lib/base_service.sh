@@ -39,6 +39,15 @@ lm_job_service_url() {
   printf 'http://127.0.0.1:%s' "${LIVEMASK_JOB_SERVICE_PORT}"
 }
 
+lm_job_service_auth_header() {
+  local token="${JOB_SERVICE_INTERNAL_BEARER_TOKEN:-${JOB_SERVICE_BEARER_TOKEN:-${INTERNAL_SERVICE_SECRET:-local-dev-secret}}}"
+  printf 'Authorization: Bearer %s' "${token}"
+}
+
+lm_job_service_curl() {
+  curl -H "$(lm_job_service_auth_header)" "$@"
+}
+
 lm_http_code() {
   local url="$1"
   curl -sS --max-time 5 -o /dev/null -w "%{http_code}" "${url}" 2>/dev/null || echo "000"
