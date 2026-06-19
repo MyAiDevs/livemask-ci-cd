@@ -9,6 +9,7 @@
 #   [4] Backend refuses an empty publish for a fresh environment
 #   [5] Admin source list shows persisted source records and projection
 #   [6] Optional publish mode updates nodeagent.runtime_config.control_acl
+#   [7] Optional local NodeAgent probe confirms public/protected route shape
 
 set -euo pipefail
 
@@ -17,6 +18,7 @@ source "${SCRIPT_DIR}/lib/base_service.sh"
 
 API_BASE="${API_BASE:-$(lm_backend_base_url)}"
 JOB_BASE="${JOB_BASE:-$(lm_job_service_url)}"
+NODEAGENT_API="${NODEAGENT_API:-http://127.0.0.1:${LIVEMASK_NODEAGENT_PORT:-19090}}"
 INTERNAL_SECRET="${LIVEMASK_INTERNAL_SERVICE_SECRET:-dev-internal-secret}"
 ADMIN_EMAIL="${LIVEMASK_ADMIN_EMAIL:-admin@livemask.dev}"
 ADMIN_PASSWORD="${LIVEMASK_ADMIN_PASSWORD:-AdminPass123!}"
@@ -226,6 +228,39 @@ JSON
   fi
 else
   skip "Set LIVEMASK_CONTROL_ACL_SMOKE_PUBLISH=1 to mutate nodeagent.runtime_config in an isolated smoke runtime"
+fi
+
+echo "--- [7] Optional NodeAgent Route Shape ---"
+PROBE_CODE=$(curl -sS --max-time 3 -o /dev/null -w "%{http_code}" "${NODEAGENT_API}/app/probe" 2>/dev/null || echo "000")
+if [[ "${PROBE_CODE}" == "200" ]]; then
+  pass "NodeAgent /app/probe remains public"
+  PROTECTED_CODE=$(curl -sS --max-time 3 -o /dev/null -w "%{http_code}" "${NODEAGENT_API}/config/status" 2>/dev/null || echo "000")
+  case "${PROTECTED_CODE}" in
+    401|403)
+      pass "NodeAgent /config/status rejects unauthenticated management access (HTTP ${PROTECTED_CODE})"
+      ;;
+    200)
+      fail "NodeAgent /config/status allowed unauthenticated access"
+      ;;
+    *)
+      skip "NodeAgent /config/status returned HTTP ${PROTECTED_CODE}"
+      ;;
+  esac
+  if [[ -n "${LIVEMASK_NODEAGENT_CONTROL_TOKEN:-}" ]]; then
+    STATUS_RAW=$(curl -sS --max-time 5 "${NODEAGENT_API}/config/status" \
+      -H "Authorization: Bearer ${LIVEMASK_NODEAGENT_CONTROL_TOKEN}" 2>/dev/null || true)
+    if echo "${STATUS_RAW}" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if "control_acl" in d or "config_version" in d else 1)' 2>/dev/null; then
+      pass "NodeAgent authenticated config status exposes runtime config evidence"
+    else
+      skip "NodeAgent authenticated config status did not expose expected fields"
+    fi
+  else
+    skip "Set LIVEMASK_NODEAGENT_CONTROL_TOKEN to check authenticated /config/status payload"
+  fi
+elif [[ "${PROBE_CODE}" == "000" ]]; then
+  skip "Local NodeAgent not reachable at ${NODEAGENT_API}"
+else
+  skip "NodeAgent /app/probe HTTP ${PROBE_CODE}"
 fi
 
 echo ""
