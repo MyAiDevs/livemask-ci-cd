@@ -42,6 +42,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+source "${SCRIPT_DIR}/lib/base_service.sh"
 
 COMPOSE_FILE="${COMPOSE_FILE:-${REPO_DIR}/infra/docker-compose.staging.yml}"
 if [[ "${COMPOSE_FILE}" != /* ]]; then
@@ -930,7 +931,7 @@ EOF
 }
 EOF
 )
-    JOB_RUN_RAW=$(curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
+    JOB_RUN_RAW=$(lm_job_service_curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
       "${JOB_SERVICE_URL}/internal/jobs/runs" \
       -H "Content-Type: application/json" \
       -d "${JOB_PAYLOAD}" 2>/dev/null || true)
@@ -972,20 +973,20 @@ if [[ "${HAVE_ROLLOUT}" == "true" && -n "${ROLLOUT_RUN_ID}" && "${ROLLOUT_RUN_ID
   done
 
   # Also try job service
-  JOB_RUN_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+  JOB_RUN_HTTP=$(lm_job_service_curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
     "${JOB_SERVICE_URL}/internal/jobs/runs/${ROLLOUT_RUN_ID}" 2>/dev/null || true)
   if [[ "${JOB_RUN_HTTP}" == "200" ]]; then
-    JOB_RUN_RESP=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${ROLLOUT_RUN_ID}") || true
+    JOB_RUN_RESP=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${ROLLOUT_RUN_ID}") || true
     JOB_STATUS=$(first_non_empty_json "${JOB_RUN_RESP}" "status" "run.status")
     pass "Job service run: HTTP 200, status=${JOB_STATUS}"
     collect_response "job_run" "${JOB_RUN_RESP}"
     security_check "Job run" "${JOB_RUN_RESP}" || true
   else
     # Fallback: query latest protocol_endpoint_rollout run from job-service list.
-    JOB_LIST_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+    JOB_LIST_HTTP=$(lm_job_service_curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
       "${JOB_SERVICE_URL}/internal/jobs/runs?job_type=protocol_endpoint_rollout" 2>/dev/null || true)
     if [[ "${JOB_LIST_HTTP}" == "200" ]]; then
-      JOB_LIST_RESP=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs?job_type=protocol_endpoint_rollout") || true
+      JOB_LIST_RESP=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs?job_type=protocol_endpoint_rollout") || true
       JOB_LIST_SUMMARY=$(echo "${JOB_LIST_RESP}" | python3 -c "
 import sys, json
 d=json.load(sys.stdin)
@@ -1887,7 +1888,7 @@ if [[ "${HAVE_ROLLOUT}" == "true" && -n "${ROLLOUT_RUN_ID}" && "${ROLLOUT_RUN_ID
 
   # If rollback endpoint not found, try via job service cancel
   if [[ -z "${RB_HTTP:-}" || "${RB_HTTP}" == "000" ]]; then
-    CANCEL_RAW=$(curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
+    CANCEL_RAW=$(lm_job_service_curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
       "${JOB_SERVICE_URL}/internal/jobs/runs/${ROLLOUT_RUN_ID}/cancel" \
       -H "Content-Type: application/json" \
       -d '{"reason":"Rollback by smoke test","triggered_by":"smoke"}' 2>/dev/null || true)

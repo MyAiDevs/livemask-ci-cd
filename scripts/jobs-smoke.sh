@@ -126,7 +126,11 @@ pg_exec() {
 }
 
 json_get() {
-  curl -fsS "$1"
+  if [[ "$1" == "${JOB_SERVICE_URL}/internal/"* || "$1" == "${JOB_SERVICE_URL}/internal/jobs"* ]]; then
+    lm_job_service_curl -fsS "$1"
+  else
+    curl -fsS "$1"
+  fi
 }
 
 echo "================================================"
@@ -205,7 +209,7 @@ echo ""
 echo "--- [5] Job Run Create / Detail ---"
 run_id=""
 run_body='{"job_type":"geoip_source_update","trigger_type":"manual","triggered_by":"smoke","parameters":{"source":"dbip_lite","edition":"country","force":false}}'
-if run_resp="$(curl -fsS --max-time 5 -X POST "${JOB_SERVICE_URL}/internal/jobs/runs" -H "Content-Type: application/json" -d "${run_body}" 2>/dev/null)"; then
+if run_resp="$(lm_job_service_curl -fsS --max-time 5 -X POST "${JOB_SERVICE_URL}/internal/jobs/runs" -H "Content-Type: application/json" -d "${run_body}" 2>/dev/null)"; then
   run_id="$(printf '%s' "${run_resp}" | sed -n 's/.*"run_id":"\([^"]*\)".*/\1/p')"
   [[ -n "${run_id}" ]] && ok "Run created ${run_id}" || bad "run_id missing"
 else
@@ -520,7 +524,7 @@ fi
 echo ""
 echo "--- Cleanup ---"
 if [[ -n "${run_id:-}" ]]; then
-  curl -sS --max-time 5 -X DELETE "${JOB_SERVICE_URL}/internal/jobs/runs/${run_id}" >/dev/null 2>&1 || true
+  lm_job_service_curl -sS --max-time 5 -X DELETE "${JOB_SERVICE_URL}/internal/jobs/runs/${run_id}" >/dev/null 2>&1 || true
 fi
 echo "  Cleaned up: job smoke data"
 echo "  Kept seed admin: admin@livemask.dev"

@@ -297,7 +297,7 @@ JOB_TYPE=""
 for jt in "${JOB_TYPES[@]}"; do
   JOB_TYPE="${jt}"
   RUN_BODY="{\"job_type\":\"${JOB_TYPE}\",\"trigger_type\":\"manual\",\"triggered_by\":\"jrdsmoke\",\"parameters\":{\"source\":\"dbip_lite\",\"edition\":\"country\",\"force\":false}}"
-  RUN_RESP=$(curl -sS --max-time 10 -X POST "${JOB_SERVICE_URL}/internal/jobs/runs" \
+  RUN_RESP=$(lm_job_service_curl -sS --max-time 10 -X POST "${JOB_SERVICE_URL}/internal/jobs/runs" \
     -H "Content-Type: application/json" \
     -d "${RUN_BODY}" 2>/dev/null || echo "{}")
   RUN_ID=$(echo "${RUN_RESP}" | quiet_json "run_id" || echo "")
@@ -320,7 +320,7 @@ echo ""
 echo "--- [6] Job Run Status Transitions ---"
 if [[ "${HAVE_JOB_SERVICE}" == "true" && -n "${RUN_ID}" ]]; then
   sleep 3
-  RUN_DETAIL=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${RUN_ID}" 2>/dev/null || echo "{}")
+  RUN_DETAIL=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${RUN_ID}" 2>/dev/null || echo "{}")
   RUN_STATUS=$(echo "${RUN_DETAIL}" | quiet_json "status" || echo "")
   if [[ -n "${RUN_STATUS}" ]]; then
     pass "Job run detail: status=${RUN_STATUS}"
@@ -376,8 +376,8 @@ fi
 echo ""
 echo "--- [8] Internal Job Definitions ---"
 if [[ "${HAVE_JOB_SERVICE}" == "true" ]]; then
-  INT_DEFS=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs" 2>/dev/null || echo "{}")
-  INT_DEFS_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" "${JOB_SERVICE_URL}/internal/jobs" 2>/dev/null || echo "000")
+  INT_DEFS=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs" 2>/dev/null || echo "{}")
+  INT_DEFS_HTTP=$(lm_job_service_curl -sS --max-time 5 -o /dev/null -w "%{http_code}" "${JOB_SERVICE_URL}/internal/jobs" 2>/dev/null || echo "000")
   if [[ "${INT_DEFS_HTTP}" == "200" ]]; then
     DEF_COUNT=$(echo "${INT_DEFS}" | python3 -c "import sys,json; d=json.load(sys.stdin); items=isinstance(d,dict) and (d.get('definitions',d.get('items',d.get('data',[])))); print(len(items) if isinstance(items,list) else 'N/A')" 2>/dev/null || echo "N/A")
     pass "Internal job definitions: HTTP 200, ${DEF_COUNT} definitions"
