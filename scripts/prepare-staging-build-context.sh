@@ -28,7 +28,24 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-WORKSPACE_ROOT="${LIVEMASK_WORKSPACE_ROOT:-$HOME/Developer/LiveMask}"
+
+default_workspace_root() {
+  if [[ -n "${LIVEMASK_WORKSPACE_ROOT:-}" ]]; then
+    printf '%s\n' "${LIVEMASK_WORKSPACE_ROOT}"
+    return
+  fi
+
+  local repo_parent
+  repo_parent="$(cd "${REPO_ROOT}/.." && pwd)"
+  if [[ -d "${repo_parent}/livemask-backend" || -d "${repo_parent}/livemask-job-service" ]]; then
+    printf '%s\n' "${repo_parent}"
+    return
+  fi
+
+  printf '%s\n' "$HOME/Developer/LiveMask"
+}
+
+WORKSPACE_ROOT="$(default_workspace_root)"
 BUILD_DEPS="${REPO_ROOT}/infra/_build_deps"
 CI_MODE=false
 DEPLOY_SERVICE_FILTER="${DEPLOY_SERVICE:-all}"
@@ -157,7 +174,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --help|-h)
-      sed -n '3,/^# =/p' "${BASH_SOURCE[0]}" | sed 's/^# //;s/^#$//'
+      sed -n '/^# Usage:/,/^# =============================================================================/p' "${BASH_SOURCE[0]}" | sed 's/^# //;s/^#$//'
       exit 0
       ;;
     *)
