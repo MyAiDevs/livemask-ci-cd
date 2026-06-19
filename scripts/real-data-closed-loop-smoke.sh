@@ -600,7 +600,7 @@ if [[ "${HAVE_JOB_SERVICE}" == "true" ]]; then
 EOF
 )
 
-  RUN_CREATE_RAW=$(curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
+  RUN_CREATE_RAW=$(lm_job_service_curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
     "${JOB_SERVICE_URL}/internal/jobs/runs" \
     -H "Content-Type: application/json" \
     -d "${JOB_RUN_BODY}") || true
@@ -665,10 +665,10 @@ echo "--- [7] Job Event/Status → DB → Admin API ---"
 
 if [[ -n "${JOB_RUN_ID:-}" ]]; then
   # Check run detail via Job Service
-  RUN_DETAIL_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+  RUN_DETAIL_HTTP=$(lm_job_service_curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
     "${JOB_SERVICE_URL}/internal/jobs/runs/${JOB_RUN_ID}" 2>/dev/null || echo "000")
   if [[ "${RUN_DETAIL_HTTP}" == "200" ]]; then
-    RUN_DETAIL=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${JOB_RUN_ID}") || true
+    RUN_DETAIL=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${JOB_RUN_ID}") || true
     RUN_STATUS=$(echo "${RUN_DETAIL}" | quiet_json "status" || echo "unknown")
     pass "Job run detail: HTTP 200, status=${RUN_STATUS} (real data from Job Service)"
     check_no_hidden_mock "job run detail" "${RUN_DETAIL}" || true
@@ -680,10 +680,10 @@ if [[ -n "${JOB_RUN_ID:-}" ]]; then
   fi
 
   # Check run events
-  EVENTS_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+  EVENTS_HTTP=$(lm_job_service_curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
     "${JOB_SERVICE_URL}/internal/jobs/runs/${JOB_RUN_ID}/events" 2>/dev/null || echo "000")
   if [[ "${EVENTS_HTTP}" == "200" ]]; then
-    EVENTS_RESP=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${JOB_RUN_ID}/events") || true
+    EVENTS_RESP=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${JOB_RUN_ID}/events") || true
     EVENTS_COUNT=$(echo "${EVENTS_RESP}" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
@@ -839,7 +839,7 @@ fi
 
 # Check Job Service health
 if [[ "${HAVE_JOB_SERVICE}" == "true" ]]; then
-  JS_JOBS_RESP=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs" 2>/dev/null || echo "{}")
+  JS_JOBS_RESP=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs" 2>/dev/null || echo "{}")
   check_no_hidden_mock "job service definitions" "${JS_JOBS_RESP}" || MOCK_VIOLATIONS=$((MOCK_VIOLATIONS + 1))
 fi
 
@@ -967,9 +967,9 @@ if [[ "${HAVE_JOB_SERVICE}" == "true" ]]; then
     "${JOB_SERVICE_URL}/internal/jobs/runs"
   )
   for ep in "${JS_SCAN_ENDPOINTS[@]}"; do
-    ep_code=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" "${ep}" 2>/dev/null || echo "000")
+    ep_code=$(lm_job_service_curl -sS --max-time 5 -o /dev/null -w "%{http_code}" "${ep}" 2>/dev/null || echo "000")
     if [[ "${ep_code}" == "200" ]]; then
-      ep_body=$(curl -sS --max-time 5 "${ep}" 2>/dev/null || echo "{}")
+      ep_body=$(lm_job_service_curl -sS --max-time 5 "${ep}" 2>/dev/null || echo "{}")
       security_check "js${ep#${JOB_SERVICE_URL}}" "${ep_body}" || SCAN_LEAK=true
     fi
   done
@@ -1079,7 +1079,7 @@ fi
 pg_exec -c "DELETE FROM nodes WHERE node_name='${NODE_NAME}'" 2>/dev/null || true
 pg_exec -c "DELETE FROM users WHERE email='${USER_EMAIL}'" 2>/dev/null || true
 if [[ -n "${JOB_RUN_ID:-}" && "${JOB_RUN_ID}" != idempotent-* ]]; then
-  curl -sS --max-time 5 -X DELETE "${JOB_SERVICE_URL}/internal/jobs/runs/${JOB_RUN_ID}" >/dev/null 2>&1 || true
+  lm_job_service_curl -sS --max-time 5 -X DELETE "${JOB_SERVICE_URL}/internal/jobs/runs/${JOB_RUN_ID}" >/dev/null 2>&1 || true
 fi
 echo "  Cleaned up: nodes, smoke users, job runs"
 echo "  Kept seed admin: admin@livemask.dev"

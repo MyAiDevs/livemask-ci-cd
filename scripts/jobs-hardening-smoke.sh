@@ -22,6 +22,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+source "${SCRIPT_DIR}/lib/base_service.sh"
 
 COMPOSE_FILE="${COMPOSE_FILE:-infra/docker-compose.staging.yml}"
 BACKEND_HTTP_PORT="${LIVEMASK_BACKEND_HTTP_PORT:-18080}"
@@ -226,7 +227,7 @@ if [[ "${HAVE_JOB_SERVICE:-false}" == "true" ]]; then
 EOF
 )
 
-  RUN_RAW=$(curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
+  RUN_RAW=$(lm_job_service_curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
     "${JOB_SERVICE_URL}/internal/jobs/runs" \
     -H "Content-Type: application/json" \
     -d "${RUN_BODY}") || true
@@ -240,7 +241,7 @@ EOF
 
       # Wait briefly and check if it was leased
       sleep 3
-      RUN_DETAIL=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${RUN_ID}") || true
+      RUN_DETAIL=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${RUN_ID}") || true
       RUN_STATUS=$(echo "${RUN_DETAIL}" | quiet_json "status" || echo "unknown")
       LEASED_BY=$(echo "${RUN_DETAIL}" | quiet_json "leased_by" || echo "")
       if [[ -n "${LEASED_BY}" ]]; then
@@ -313,7 +314,7 @@ if [[ "${HAVE_JOB_SERVICE:-false}" == "true" ]]; then
 EOF
 )
 
-  FAIL_RUN_RAW=$(curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
+  FAIL_RUN_RAW=$(lm_job_service_curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
     "${JOB_SERVICE_URL}/internal/jobs/runs" \
     -H "Content-Type: application/json" \
     -d "${FAIL_RUN_BODY}") || true
@@ -329,7 +330,7 @@ EOF
       RETRY_ATTEMPT=0
       for i in 1 2 3; do
         sleep 5
-        RETRY_DETAIL=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${FAIL_RUN_ID}") || true
+        RETRY_DETAIL=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${FAIL_RUN_ID}") || true
         RETRY_COUNT=$(echo "${RETRY_DETAIL}" | quiet_json "retry_count" || echo "0")
         RETRY_STATUS=$(echo "${RETRY_DETAIL}" | quiet_json "status" || echo "unknown")
         DBG "Retry check ${i}/3: status=${RETRY_STATUS}, retry_count=${RETRY_COUNT}"
@@ -411,10 +412,10 @@ echo "--- [5] Dead Letter Queue Test ---"
 if [[ "${HAVE_JOB_SERVICE:-false}" == "true" ]]; then
   # Check if dead letter queue endpoints exist
   for dlq_path in "dead-letter" "dead_letter" "dead-letter-queue" "dlq"; do
-    DLQ_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+    DLQ_HTTP=$(lm_job_service_curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
       "${JOB_SERVICE_URL}/internal/jobs/${dlq_path}" 2>/dev/null || true)
     if [[ "${DLQ_HTTP}" == "200" ]]; then
-      DLQ_RESP=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/${dlq_path}") || true
+      DLQ_RESP=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/${dlq_path}") || true
       DLQ_COUNT=$(echo "${DLQ_RESP}" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
@@ -468,14 +469,14 @@ if [[ "${HAVE_JOB_SERVICE:-false}" == "true" ]]; then
 EOF
 )
 
-  FIRST_RAW=$(curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
+  FIRST_RAW=$(lm_job_service_curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
     "${JOB_SERVICE_URL}/internal/jobs/runs" \
     -H "Content-Type: application/json" \
     -d "${DUP_BODY}") || true
   FIRST_HTTP=$(echo "${FIRST_RAW}" | tail -1)
 
   # Second submission with same unique_key
-  SECOND_RAW=$(curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
+  SECOND_RAW=$(lm_job_service_curl -sS -w "\n%{http_code}" --max-time 5 -X POST \
     "${JOB_SERVICE_URL}/internal/jobs/runs" \
     -H "Content-Type: application/json" \
     -d "${DUP_BODY}") || true
@@ -517,8 +518,8 @@ echo "--- [7] Run Events Test ---"
 
 if [[ "${HAVE_JOB_SERVICE:-false}" == "true" && -n "${RUN_ID:-}" ]]; then
   EVENTS_ENDPOINT="${JOB_SERVICE_URL}/internal/jobs/runs/${RUN_ID}/events"
-  EVENTS_RESP=$(curl -sS --max-time 5 "${EVENTS_ENDPOINT}") || true
-  EVENTS_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+  EVENTS_RESP=$(lm_job_service_curl -sS --max-time 5 "${EVENTS_ENDPOINT}") || true
+  EVENTS_HTTP=$(lm_job_service_curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
     "${EVENTS_ENDPOINT}" 2>/dev/null || true)
 
   if [[ "${EVENTS_HTTP}" == "200" ]]; then
@@ -597,10 +598,10 @@ echo "--- [8] Job Queue Stats ---"
 
 if [[ "${HAVE_JOB_SERVICE:-false}" == "true" ]]; then
   for stats_path in "stats" "queue/stats" "metrics" "jobs/stats"; do
-    STATS_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+    STATS_HTTP=$(lm_job_service_curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
       "${JOB_SERVICE_URL}/internal/jobs/${stats_path}" 2>/dev/null || true)
     if [[ "${STATS_HTTP}" == "200" ]]; then
-      STATS_RESP=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/${stats_path}") || true
+      STATS_RESP=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/${stats_path}") || true
       pass "Job queue stats (${stats_path}): HTTP 200"
 
       # Check for expected counters
@@ -646,10 +647,10 @@ echo "--- [9] Dead Letter Queue Inspection ---"
 
 if [[ "${HAVE_JOB_SERVICE:-false}" == "true" ]]; then
   for inspect_path in "dead-letter/inspect" "dead_letter/inspect" "dlq/inspect" "dead-letter/detail"; do
-    INSPECT_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+    INSPECT_HTTP=$(lm_job_service_curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
       "${JOB_SERVICE_URL}/internal/jobs/${inspect_path}" 2>/dev/null || true)
     if [[ "${INSPECT_HTTP}" == "200" ]]; then
-      INSPECT_RESP=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/${inspect_path}") || true
+      INSPECT_RESP=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/${inspect_path}") || true
       pass "Dead letter inspection (${inspect_path}): HTTP 200"
       security_check "DLQ inspect ${inspect_path}" "${INSPECT_RESP}" || true
       break
@@ -658,7 +659,7 @@ if [[ "${HAVE_JOB_SERVICE:-false}" == "true" ]]; then
 
   # Check for DLQ replay/retry endpoint
   for replay_path in "dead-letter/replay" "dead_letter/replay" "dlq/replay"; do
-    REPLAY_HTTP=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
+    REPLAY_HTTP=$(lm_job_service_curl -sS --max-time 5 -o /dev/null -w "%{http_code}" \
       "${JOB_SERVICE_URL}/internal/jobs/${replay_path}" \
       -X POST -H "Content-Type: application/json" \
       -d '{"reason":"smoke test"}' 2>/dev/null || true)
@@ -680,7 +681,7 @@ echo "--- [10] No Secret Leakage in Job Payloads ---"
 LEAK_FOUND=false
 if [[ "${HAVE_JOB_SERVICE:-false}" == "true" ]]; then
   # Check job definitions for secrets (only scan leaf values, not keys/descriptions)
-  DEFS_RESP=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs" 2>/dev/null || echo "{}")
+  DEFS_RESP=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs" 2>/dev/null || echo "{}")
   SECRET_CHECK=$(echo "${DEFS_RESP}" | python3 -c "
 import sys,json
 risky = ['api_key','license_key','token','password','secret','hmac']
@@ -721,7 +722,7 @@ else:
 
   # Check all rund details for secret leakage
   if [[ -n "${RUN_ID:-}" ]]; then
-    RUN_CHECK=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${RUN_ID}") || echo "{}"
+    RUN_CHECK=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/jobs/runs/${RUN_ID}") || echo "{}"
     security_check "Job run detail" "${RUN_CHECK}" || LEAK_FOUND=true
   fi
 fi
@@ -739,7 +740,7 @@ SCAN_LEAK=false
 
 if [[ "${HAVE_JOB_SERVICE:-false}" == "true" ]]; then
   for scan_path in "jobs" "jobs/runs" "jobs/stats" "jobs/dead-letter"; do
-    SCAN_BODY=$(curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/${scan_path}" 2>/dev/null || echo "{}")
+    SCAN_BODY=$(lm_job_service_curl -sS --max-time 5 "${JOB_SERVICE_URL}/internal/${scan_path}" 2>/dev/null || echo "{}")
     if [[ "${SCAN_BODY}" != "{}" ]]; then
       security_check "jobs/${scan_path}" "${SCAN_BODY}" || SCAN_LEAK=true
     fi
@@ -765,7 +766,7 @@ echo ""
 echo "--- Cleanup ---"
 # Remove our test run(s)
 if [[ -n "${RUN_ID:-}" ]]; then
-  curl -sS --max-time 5 -X DELETE "${JOB_SERVICE_URL}/internal/jobs/runs/${RUN_ID}" >/dev/null 2>&1 || true
+  lm_job_service_curl -sS --max-time 5 -X DELETE "${JOB_SERVICE_URL}/internal/jobs/runs/${RUN_ID}" >/dev/null 2>&1 || true
 fi
 echo "  Cleaned up: job smoke data"
 echo "  Kept seed admin: admin@livemask.dev"

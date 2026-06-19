@@ -272,10 +272,18 @@ JS_ENDPOINTS=(
   "${JOB_SERVICE_URL}/internal/jobs/runs"
 )
 for ep in "${JS_ENDPOINTS[@]}"; do
-  code=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" "${ep}" 2>/dev/null || echo "000")
+  if [[ "${ep}" == "${JOB_SERVICE_URL}/internal/"* || "${ep}" == "${JOB_SERVICE_URL}/internal/jobs"* ]]; then
+    code=$(lm_job_service_curl -sS --max-time 5 -o /dev/null -w "%{http_code}" "${ep}" 2>/dev/null || echo "000")
+  else
+    code=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" "${ep}" 2>/dev/null || echo "000")
+  fi
   label="${ep#${JOB_SERVICE_URL}}"
   if [[ "${code}" == "200" ]]; then
-    body=$(curl -sS --max-time 5 "${ep}" 2>/dev/null || echo "{}")
+    if [[ "${ep}" == "${JOB_SERVICE_URL}/internal/"* || "${ep}" == "${JOB_SERVICE_URL}/internal/jobs"* ]]; then
+      body=$(lm_job_service_curl -sS --max-time 5 "${ep}" 2>/dev/null || echo "{}")
+    else
+      body=$(curl -sS --max-time 5 "${ep}" 2>/dev/null || echo "{}")
+    fi
     if secret_leak_scan "job-service:${label}" "${body}"; then
       pass "job-service ${label}: clean"
     fi
