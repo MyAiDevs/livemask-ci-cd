@@ -209,7 +209,8 @@ print_build_context_ref() {
     return 0
   fi
 
-  if ref="$(git -C "${context_dir}" rev-parse --short HEAD 2>/dev/null)"; then
+  local git_root=""
+  if git_root="$(git -C "${context_dir}" rev-parse --show-toplevel 2>/dev/null)" && [[ "${git_root}" == "${context_dir}" ]] && ref="$(git -C "${context_dir}" rev-parse --short HEAD 2>/dev/null)"; then
     echo "[deploy-service] build context for ${service}: git ${ref} (${context_dir})"
     return 0
   fi
