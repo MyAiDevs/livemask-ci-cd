@@ -59,6 +59,68 @@ required_ci_files() {
   esac
 }
 
+copy_workspace_source() {
+  local ws_repo="$1"
+  local target="$2"
+  local repo_name="$3"
+
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete \
+      --exclude='.git' \
+      --exclude='.cache' \
+      --exclude='.gomodcache' \
+      --exclude='node_modules' \
+      --exclude='.next' \
+      --exclude='dist' \
+      --exclude='build' \
+      "${ws_repo}/" "${target}/"
+  else
+    # Keep the fallback content-shaped like rsync's source-root copy. The old
+    # cp fallback copied `${repo_name}/` as a nested directory, which breaks
+    # Dockerfiles that expect package.json/go.mod at infra/_build_deps/<name>/.
+    if [[ -d "${target}/${repo_name}" ]]; then
+      echo "[prepare]  [cleanup] removing legacy nested copy: ${target}/${repo_name}"
+      rm -rf "${target:?}/${repo_name}"
+    fi
+    (
+      cd "${ws_repo}"
+      tar \
+        --exclude='./.git' \
+        --exclude='./.cache' \
+        --exclude='./.gomodcache' \
+        --exclude='./node_modules' \
+        --exclude='./.next' \
+        --exclude='./dist' \
+        --exclude='./build' \
+        -cf - .
+    ) | (
+      cd "${target}"
+      tar -xf -
+    )
+  fi
+}
+
+verify_build_context() {
+  local dir_name="$1"
+  local repo_name="$2"
+  local target="$3"
+  local missing=()
+
+  while IFS= read -r required_file; do
+    [[ -z "${required_file}" ]] && continue
+    if [[ ! -f "${target}/${required_file}" ]]; then
+      missing+=("${required_file}")
+    fi
+  done < <(required_ci_files "${dir_name}")
+
+  if [[ "${#missing[@]}" -gt 0 ]]; then
+    echo "ERROR: build context for ${repo_name} is incomplete at ${target}" >&2
+    printf '  missing: %s\n' "${missing[@]}" >&2
+    echo "Verify LIVEMASK_WORKSPACE_ROOT and the copy fallback before docker compose build." >&2
+    exit 2
+  fi
+}
+
 should_prepare_dir() {
   local dir_name="$1"
   case "${DEPLOY_SERVICE_FILTER}" in
@@ -150,19 +212,11 @@ printf "%s" "${REPO_ROWS}" | while IFS='|' read -r dir_name repo_name; do
   if [[ -d "${ws_repo}" ]]; then
     echo "[prepare]  [workspace] ${ws_repo} → ${target}"
     mkdir -p "${target}"
-    # Use rsync or cp to copy source, excluding VCS/dependency/build caches.
+    # Use rsync or tar fallback to copy source, excluding VCS/dependency/build caches.
     # Do not rm -rf the target first: local Docker builds may have left
     # root-owned cache directories under infra/_build_deps.
-    rsync -a --delete \
-      --exclude='.git' \
-      --exclude='.cache' \
-      --exclude='.gomodcache' \
-      --exclude='node_modules' \
-      --exclude='.next' \
-      --exclude='dist' \
-      --exclude='build' \
-      "${ws_repo}/" "${target}/" 2>/dev/null || \
-      cp -a "${ws_repo}/" "${target}/"
+    copy_workspace_source "${ws_repo}" "${target}" "${repo_name}"
+    verify_build_context "${dir_name}" "${repo_name}" "${target}"
     touch "${target}/.exists"
   else
     echo "[prepare]  [warn] ${repo_name} not found at ${ws_repo}; creating stub"
