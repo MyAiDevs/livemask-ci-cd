@@ -35,9 +35,9 @@ COPY _build_deps/nodeagent/docker/entrypoint.sh /usr/local/bin/livemask-nodeagen
 RUN chmod +x /usr/local/bin/livemask-nodeagent-entrypoint /usr/local/bin/install-singbox.sh \
     && sh /usr/local/bin/install-singbox.sh /usr/local/bin \
     && mkdir -p /var/lib/livemask-nodeagent /var/lib/livemask-nodeagent/sing-box /var/lib/livemask-nodeagent/geoip /var/lib/livemask-nodeagent/releases
-ENV NODEAGENT_ENDPOINT_CONFIG_URL="https://gitlab.com/sammytan/livemaskvpn/-/raw/main/cfg.json" \
-    NODEAGENT_API_ENDPOINTS="https://api.livemask-vpn.com https://api.vpn-mirrors.xyz https://api.vpn-mirrors.cfd" \
-    NODEAGENT_JOB_ENDPOINTS="https://job.livemask-vpn.com https://job.vpn-mirrors.xyz https://job.vpn-mirrors.cfd" \
+ENV NODEAGENT_ENDPOINT_CONFIG_URL="" \
+    NODEAGENT_API_ENDPOINTS="" \
+    NODEAGENT_JOB_ENDPOINTS="" \
     NODEAGENT_ENDPOINT_AUTO_RESOLVE="true" \
     NODEAGENT_INSTALL_SINGBOX_ON_START="true" \
     NODEAGENT_AUTO_DETECT_PUBLIC_ENDPOINT="true" \
