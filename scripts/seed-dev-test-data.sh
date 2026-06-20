@@ -28,6 +28,25 @@ sql_escape() {
   printf "%s" "$1" | sed "s/'/''/g"
 }
 
+seed_auth_roles() {
+  pg_exec <<'SQL'
+INSERT INTO roles (role_key, description)
+VALUES
+  ('user', 'Normal end user'),
+  ('subscriber', 'User with active subscription entitlement'),
+  ('sponsor_ambassador', 'Sponsor node / sponsor revenue self-service'),
+  ('promotion_ambassador', 'Referral and promotion revenue self-service'),
+  ('support_agent', 'User support and ticket handling'),
+  ('ops_operator', 'Node/config/operations management'),
+  ('finance_operator', 'Payments, invoices, settlement review'),
+  ('auditor', 'Read-only audit access'),
+  ('admin', 'Full system administration'),
+  ('super_admin', 'Break-glass owner; can manage roles')
+ON CONFLICT (role_key) DO UPDATE
+SET description = EXCLUDED.description;
+SQL
+}
+
 seed_user() {
   local email="$1"
   local password="$2"
@@ -114,6 +133,9 @@ SET channel = 'dev',
     revoked_at = NULL;
 SQL
 }
+
+echo "[seed-dev-test-data] seeding auth role catalog"
+seed_auth_roles
 
 echo "[seed-dev-test-data] seeding dev users"
 seed_user "${DEV_ADMIN_EMAIL:-admin@livemask.dev}" "${DEV_ADMIN_PASSWORD:-AdminPass123!}" "Dev Admin" admin
