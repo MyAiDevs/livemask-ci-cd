@@ -46,7 +46,7 @@ services:
       DB_DSN: "${DB_DSN:-postgres://${POSTGRES_USER:-livemask}:${POSTGRES_PASSWORD:-livemask}@host.docker.internal:${POSTGRES_PORT:-15432}/${POSTGRES_DB:-livemask}?sslmode=disable}"
       REDIS_ADDR: "${REDIS_ADDR:-host.docker.internal:${REDIS_PORT:-16379}}"
       VERSION: "${BACKEND_VERSION:-0.0.0}"
-      JWT_SECRET: "${JWT_SECRET:-dev-secret-key-do-not-use-in-production-32chr}"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is required and must be at least 32 characters}"
       NODEAGENT_BACKEND_TLS_PORT: "${NODEAGENT_BACKEND_TLS_PORT:-8443}"
       NODEAGENT_BACKEND_TLS_CERT_PATH: "${NODEAGENT_BACKEND_TLS_CERT_PATH:-data/cert/backend.cert.pem}"
       NODEAGENT_BACKEND_TLS_KEY_PATH: "${NODEAGENT_BACKEND_TLS_KEY_PATH:-data/cert/backend.key.pem}"
