@@ -298,6 +298,34 @@ health_one() {
   esac
 }
 
+seed_job_service_default_schedules() {
+  local enabled="${JOB_SERVICE_SEED_DEFAULT_SCHEDULES:-true}"
+  if [[ "${enabled}" != "true" ]]; then
+    echo "[deploy-service] job-service default schedule seed skipped (JOB_SERVICE_SEED_DEFAULT_SCHEDULES=${enabled})"
+    return 0
+  fi
+
+  local seed_script=""
+  for candidate in \
+    "${REPO_ROOT}/../livemask-job-service/scripts/seed-default-schedules.sh" \
+    "${REPO_ROOT}/infra/_build_deps/job-service/scripts/seed-default-schedules.sh"; do
+    if [[ -f "${candidate}" ]]; then
+      seed_script="${candidate}"
+      break
+    fi
+  done
+  if [[ -z "${seed_script}" ]]; then
+    echo "[deploy-service] ERROR: job-service schedule seed script not found" >&2
+    echo "[deploy-service] expected ../livemask-job-service/scripts/seed-default-schedules.sh or infra/_build_deps/job-service/scripts/seed-default-schedules.sh" >&2
+    return 1
+  fi
+
+  echo "[deploy-service] seeding job-service default schedules via ${seed_script}"
+  JOB_SERVICE_URL="${JOB_SERVICE_URL:-http://127.0.0.1:${LIVEMASK_JOB_SERVICE_PORT:-64002}}" \
+  JOB_SERVICE_INTERNAL_BEARER_TOKEN="${JOB_SERVICE_INTERNAL_BEARER_TOKEN:-${INTERNAL_SERVICE_SECRET:-local-dev-secret}}" \
+    bash "${seed_script}"
+}
+
 if [[ "${START_DEPS}" == "true" ]]; then
   echo "[deploy-service] ensuring infrastructure deps are running"
   compose up -d postgres redis
@@ -321,5 +349,11 @@ if [[ "${SKIP_HEALTH}" != "true" ]]; then
     health_one "${service}"
   done
 fi
+
+for service in "${services[@]}"; do
+  if [[ "${service}" == "job-service" ]]; then
+    seed_job_service_default_schedules
+  fi
+done
 
 echo "[deploy-service] complete: ${SERVICE}"
