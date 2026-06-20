@@ -15,13 +15,10 @@ skip() { SKIP=$((SKIP + 1)); echo "  [SKIP] $*"; }
 
 echo "=== Seed job cron schedules ==="
 
-LOGIN=$(curl -sS --max-time 10 -X POST "${API_BASE}/admin/api/v1/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{"request_id":"seed-job-cron","email":"admin@livemask.dev","password":"AdminPass123!","client_type":"admin"}' 2>/dev/null || echo "{}")
-TOKEN=$(echo "${LOGIN}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || echo "")
+TOKEN="${JOB_SCHEDULE_SEED_ADMIN_TOKEN:-${ADMIN_API_TOKEN:-}}"
 if [[ -z "${TOKEN}" ]]; then
-  fail "Admin login failed — cannot seed schedules"
-  exit 1
+  fail "JOB_SCHEDULE_SEED_ADMIN_TOKEN or ADMIN_API_TOKEN is required - this script does not login with hardcoded credentials"
+  exit 2
 fi
 AUTH="Authorization: Bearer ${TOKEN}"
 
