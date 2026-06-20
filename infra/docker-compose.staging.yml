@@ -52,8 +52,10 @@ services:
       NODEAGENT_BACKEND_TLS_KEY_PATH: "${NODEAGENT_BACKEND_TLS_KEY_PATH:-data/cert/backend.key.pem}"
       CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-https://admin.livemask-vpn.com,https://www.livemask-vpn.com,https://livemask-vpn.com,http://127.0.0.1:${LIVEMASK_ADMIN_PORT:-64001},http://127.0.0.1:${LIVEMASK_WEBSITE_PORT:-64000}}"
       PUBLIC_PRIMARY_DOMAIN: "${PUBLIC_PRIMARY_DOMAIN:-}"
-      # GeoIP credential encryption (dev-only; production uses a real key)
-      GEOIP_CREDENTIAL_ENCRYPTION_KEY: "${GEOIP_CREDENTIAL_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+      # GeoIP credential encryption. Leave empty unless an operator explicitly
+      # provides a runtime secret; Backend fails closed before storing/decrypting
+      # GeoIP source credentials when this is unset.
+      GEOIP_CREDENTIAL_ENCRYPTION_KEY: "${GEOIP_CREDENTIAL_ENCRYPTION_KEY:-}"
       GEOIP_UPDATE_ENABLED: "${GEOIP_UPDATE_ENABLED:-true}"
       GEOIP_UPDATE_INTERVAL: "${GEOIP_UPDATE_INTERVAL:-24h}"
       GEOIP_DATA_DIR: "${GEOIP_DATA_DIR:-data/geoip}"
