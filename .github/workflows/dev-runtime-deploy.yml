@@ -59,6 +59,8 @@ jobs:
       HY2_TLS_CERT_DIR: "/etc/letsencrypt/live/api.livemask-vpn.com"
       GEOIP_UPDATE_ENABLED: "true"
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY }}
+      DEV_RUNTIME_SECRET_FILE: "/opt/livemask-dev/runtime-secrets.env"
       HYSTERIA2_AUTH: "DevHy2Pass-change-me"
       EXTERNAL_NODEAGENT_HOSTS: "root@61.200.88.68"
       NODEAGENT_IMAGE_SOURCES: "ghcr.io/myaidevs/livemask-nodeagent:dev docker.io/myaidevs/livemask-nodeagent:dev registry.cn-hongkong.aliyuncs.com/livemask/livemask-nodeagent:dev"
@@ -97,14 +99,55 @@ jobs:
           echo "resolved_deploy_service=${resolved}"
           echo "DEPLOY_SERVICE=${resolved}" >> "${GITHUB_ENV}"
 
-      - name: Validate dev runtime secrets
+      - name: Ensure dev runtime secrets
         if: ${{ env.DEPLOY_SERVICE != 'status-only' }}
         run: |
+          set -euo pipefail
+          secret_file="${DEV_RUNTIME_SECRET_FILE}"
+          mkdir -p "$(dirname "${secret_file}")"
+          touch "${secret_file}"
+          chmod 600 "${secret_file}"
+          set -a
+          # shellcheck disable=SC1090
+          . "${secret_file}" || true
+          set +a
+
+          persist_secret() {
+            local key="$1"
+            local value="$2"
+            local tmp
+            tmp="$(mktemp)"
+            grep -v "^${key}=" "${secret_file}" > "${tmp}" || true
+            printf '%s=%q\n' "${key}" "${value}" >> "${tmp}"
+            mv "${tmp}" "${secret_file}"
+            chmod 600 "${secret_file}"
+          }
+
+          if [[ -z "${JWT_SECRET:-}" ]]; then
+            JWT_SECRET="$(openssl rand -base64 48)"
+            persist_secret "JWT_SECRET" "${JWT_SECRET}"
+          fi
+          if [[ -z "${NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY:-}" ]]; then
+            NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY="$(openssl rand -base64 48)"
+            persist_secret "NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY" "${NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY}"
+          fi
           if [[ -z "${JWT_SECRET:-}" || "${#JWT_SECRET}" -lt 32 ]]; then
-            echo "ERROR: GitHub Actions secret JWT_SECRET is required for dev runtime deploy and must be at least 32 characters." >&2
+            echo "ERROR: JWT_SECRET must be at least 32 characters." >&2
             exit 2
           fi
-          echo "JWT_SECRET is configured for dev runtime deploy."
+          if [[ -z "${NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY:-}" || "${#NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY}" -lt 32 ]]; then
+            echo "ERROR: NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY must be at least 32 characters." >&2
+            exit 2
+          fi
+          {
+            echo "JWT_SECRET<<__LIVEMASK_SECRET__"
+            printf '%s\n' "${JWT_SECRET}"
+            echo "__LIVEMASK_SECRET__"
+            echo "NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY<<__LIVEMASK_SECRET__"
+            printf '%s\n' "${NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY}"
+            echo "__LIVEMASK_SECRET__"
+          } >> "${GITHUB_ENV}"
+          echo "Required dev runtime secrets are available."
 
       - name: Checkout backend source into build context
         if: ${{ env.DEPLOY_SERVICE == 'all' || env.DEPLOY_SERVICE == 'backend' }}
