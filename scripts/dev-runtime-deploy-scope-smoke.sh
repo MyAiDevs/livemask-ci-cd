@@ -23,6 +23,8 @@ grep -q "github.event.inputs.service || github.event.client_payload.service || '
 grep -q "status-only|backend|admin|website|job-service|nodeagent|all" "${deploy_workflow}" \
   || fail "dev-runtime-deploy must validate allowed service names"
 
+grep -Fq 'DEV_RUNTIME_SECRET_FILE: "${{ github.workspace }}/../.livemask-dev/runtime-secrets.env"' "${deploy_workflow}" \
+  || fail "dev-runtime-deploy generated dev secrets must use a runner-writable workspace sibling"
 grep -q "Pre-clean stale build deps" "${deploy_workflow}" \
   || fail "dev-runtime-deploy must pre-clean stale build deps before checkout"
 grep -Fq 'target="${GITHUB_WORKSPACE}/infra/_build_deps"' "${deploy_workflow}" \
