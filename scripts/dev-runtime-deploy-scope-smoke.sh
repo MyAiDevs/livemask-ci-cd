@@ -23,6 +23,13 @@ grep -q "github.event.inputs.service || github.event.client_payload.service || '
 grep -q "status-only|backend|admin|website|job-service|nodeagent|all" "${deploy_workflow}" \
   || fail "dev-runtime-deploy must validate allowed service names"
 
+grep -q "clean: false" "${deploy_workflow}" \
+  || fail "dev-runtime-deploy checkout must disable pre-step clean so stale build deps can be repaired"
+grep -q "Reset stale build deps" "${deploy_workflow}" \
+  || fail "dev-runtime-deploy must reset stale build deps after checkout"
+grep -Fq 'sudo rm -rf "${target}"' "${deploy_workflow}" \
+  || fail "dev-runtime-deploy stale build deps reset must support privileged cleanup"
+
 grep -q "livemask-backend' && 'backend'" "${trigger_workflow}" \
   || fail "backend repo must map to backend service"
 grep -q "livemask-admin' && 'admin'" "${trigger_workflow}" \
