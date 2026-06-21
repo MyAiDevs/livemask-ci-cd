@@ -69,6 +69,23 @@ jobs:
       group: livemask-staging
       labels: [self-hosted, Linux, livemask, docker, staging]
     steps:
+      - name: Pre-clean stale build deps
+        run: |
+          set -euo pipefail
+          target="${GITHUB_WORKSPACE}/infra/_build_deps"
+          if [[ -d "${target}" ]]; then
+            if ! rm -rf "${target}" 2>/tmp/livemask-precheckout-build-deps-rm.log; then
+              echo "Normal pre-checkout cleanup could not remove ${target}; attempting privileged cleanup."
+              cat /tmp/livemask-precheckout-build-deps-rm.log || true
+              if command -v sudo >/dev/null 2>&1; then
+                sudo rm -rf "${target}"
+              else
+                echo "ERROR: ${target} contains files not owned by the runner and sudo is unavailable." >&2
+                exit 1
+              fi
+            fi
+          fi
+
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.LIVEMASK_BOT_TOKEN || github.token }}
