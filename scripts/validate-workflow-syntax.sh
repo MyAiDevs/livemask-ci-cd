@@ -161,15 +161,19 @@ RUBY
 
 echo
 echo "=== Validate Docker compose configs ==="
-docker compose -f infra/docker-compose.staging.yml config >/tmp/livemask-dev-compose.yml
-env -u PUBLIC_API_BASE_URL -u STAGING_PUBLIC_API_BASE_URL docker compose -f infra/docker-compose.staging.yml config >/tmp/livemask-dev-compose-no-public-api.yml
+compose_env=(
+  JWT_SECRET=dev-workflow-syntax-guard-dummy-jwt-secret
+  NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY=dev-workflow-syntax-guard-dummy-notify-key
+)
+env "${compose_env[@]}" docker compose -f infra/docker-compose.staging.yml config >/tmp/livemask-dev-compose.yml
+env -u PUBLIC_API_BASE_URL -u STAGING_PUBLIC_API_BASE_URL "${compose_env[@]}" docker compose -f infra/docker-compose.staging.yml config >/tmp/livemask-dev-compose-no-public-api.yml
 if grep -q "VITE_API_BASE_URL: http://127.0.0.1" /tmp/livemask-dev-compose-no-public-api.yml ||
   grep -q "PUBLIC_API_BASE_URL: http://127.0.0.1" /tmp/livemask-dev-compose-no-public-api.yml; then
   echo "dev compose default must not expose localhost as browser/sponsor public API" >&2
   exit 1
 fi
-docker compose -f infra/docker-compose.local.yml config >/tmp/livemask-local-compose.yml
-docker compose -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml config >/tmp/livemask-local-hot-compose.yml
+env "${compose_env[@]}" docker compose -f infra/docker-compose.local.yml config >/tmp/livemask-local-compose.yml
+env "${compose_env[@]}" docker compose -f infra/docker-compose.local.yml -f infra/docker-compose.hot.yml config >/tmp/livemask-local-hot-compose.yml
 
 echo
 echo "=== Validate shell syntax ==="
