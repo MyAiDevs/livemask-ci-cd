@@ -31,8 +31,10 @@ grep -q "clean: false" "${deploy_workflow}" \
   || fail "dev-runtime-deploy checkout must disable pre-step clean so stale build deps can be repaired"
 grep -q "Reset stale build deps" "${deploy_workflow}" \
   || fail "dev-runtime-deploy must reset stale build deps after checkout"
-grep -Fq 'sudo rm -rf "${target}"' "${deploy_workflow}" \
-  || fail "dev-runtime-deploy stale build deps reset must support privileged cleanup"
+grep -Fq 'sudo -n rm -rf "${target}"' "${deploy_workflow}" \
+  || fail "dev-runtime-deploy stale build deps reset must support non-interactive sudo cleanup"
+grep -q "busybox:1.36" "${deploy_workflow}" \
+  || fail "dev-runtime-deploy stale build deps reset must support docker cleanup fallback"
 
 grep -q "livemask-backend' && 'backend'" "${trigger_workflow}" \
   || fail "backend repo must map to backend service"
