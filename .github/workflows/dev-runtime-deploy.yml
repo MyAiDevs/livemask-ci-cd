@@ -60,7 +60,7 @@ jobs:
       GEOIP_UPDATE_ENABLED: "true"
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
       NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.NOTIFICATION_CREDENTIAL_ENCRYPTION_KEY }}
-      DEV_RUNTIME_SECRET_FILE: "/opt/livemask-dev/runtime-secrets.env"
+      DEV_RUNTIME_SECRET_FILE: "${{ github.workspace }}/../.livemask-dev/runtime-secrets.env"
       HYSTERIA2_AUTH: "DevHy2Pass-change-me"
       EXTERNAL_NODEAGENT_HOSTS: "root@61.200.88.68"
       NODEAGENT_IMAGE_SOURCES: "ghcr.io/myaidevs/livemask-nodeagent:dev docker.io/myaidevs/livemask-nodeagent:dev registry.cn-hongkong.aliyuncs.com/livemask/livemask-nodeagent:dev"
