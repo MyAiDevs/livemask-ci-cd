@@ -14,12 +14,6 @@ on:
       go-version:
         required: true
         type: string
-    secrets:
-      LARK_BOT_WEBHOOK:
-        required: false
-      LARK_BOT_SECRET:
-        required: false
-
 permissions:
   actions: read
   contents: read
@@ -34,17 +28,3 @@ jobs:
           go-version: ${{ inputs.go-version }}
       - run: go mod download
       - run: go build ./...
-
-  notify-lark:
-    needs: [build]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Notify Lark
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          LARK_BOT_WEBHOOK: ${{ secrets.LARK_BOT_WEBHOOK }}
-          LARK_BOT_SECRET: ${{ secrets.LARK_BOT_SECRET }}
-          WORKFLOW_RESULT: ${{ needs.build.result }}
-        run: bash .github/scripts/lark-notify.sh "$WORKFLOW_RESULT"

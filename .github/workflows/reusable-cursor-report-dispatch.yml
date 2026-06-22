@@ -29,8 +29,6 @@
 #         report-kind: standard                  # optional
 #       secrets:
 #         LIVEMASK_BOT_TOKEN: ${{ secrets.LIVEMASK_BOT_TOKEN }}
-#         LARK_BOT_WEBHOOK: ${{ secrets.LARK_BOT_WEBHOOK }}
-#         LARK_BOT_SECRET: ${{ secrets.LARK_BOT_SECRET }}
 
 name: Reusable Cursor Report Dispatch
 
@@ -96,12 +94,6 @@ on:
       LIVEMASK_BOT_TOKEN:
         required: true
         description: GitHub token with repo scope to send repository_dispatch
-      LARK_BOT_WEBHOOK:
-        required: false
-        description: Lark bot webhook URL for notification
-      LARK_BOT_SECRET:
-        required: false
-        description: Lark bot HMAC sign secret
 
 permissions:
   contents: read
@@ -119,8 +111,6 @@ jobs:
         id: dispatch
         env:
           LIVEMASK_BOT_TOKEN: ${{ secrets.LIVEMASK_BOT_TOKEN }}
-          LARK_BOT_WEBHOOK: ${{ secrets.LARK_BOT_WEBHOOK || '' }}
-          LARK_BOT_SECRET: ${{ secrets.LARK_BOT_SECRET || '' }}
         run: |
           bash scripts/cursor-report-dispatch.sh \
             --task-id "${{ inputs.task-id }}" \
@@ -134,6 +124,4 @@ jobs:
             --result "${{ inputs.result }}" \
             --report-kind "${{ inputs.report-kind }}" \
             --target-repo "${{ inputs.target-repo }}" \
-            ${{ inputs.dry-run && '--dry-run' || '' }} \
-            ${{ secrets.LARK_BOT_WEBHOOK != '' && format('--lark-webhook-url {0}', secrets.LARK_BOT_WEBHOOK) || '' }} \
-            ${{ secrets.LARK_BOT_SECRET != '' && format('--lark-secret {0}', secrets.LARK_BOT_SECRET) || '' }}
+            ${{ inputs.dry-run && '--dry-run' || '' }}

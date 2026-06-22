@@ -33,7 +33,7 @@ workflow_contracts = {
   ".github/workflows/dev-runtime-deploy.yml" => {
     "name" => "Dev Runtime Deploy",
     "on" => ["workflow_dispatch", "repository_dispatch"],
-    "jobs" => ["deploy", "notify-lark"],
+    "jobs" => ["deploy"],
   },
   ".github/workflows/reusable-trigger-dev-runtime-deploy.yml" => {
     "name" => "Reusable Trigger Dev Runtime Deploy",
@@ -83,17 +83,17 @@ workflow_contracts = {
   ".github/workflows/production-release.yml" => {
     "name" => "Production Release Gate",
     "on" => ["workflow_dispatch", "repository_dispatch"],
-    "jobs" => ["release-gate", "notify-lark"],
+    "jobs" => ["release-gate"],
   },
   ".github/workflows/reusable-docker-build.yml" => {
     "name" => "Reusable Docker Build & Push",
     "on" => ["workflow_call"],
-    "jobs" => ["build", "notify-lark"],
+    "jobs" => ["build"],
   },
   ".github/workflows/reusable-go-build.yml" => {
     "name" => "Reusable Go Build",
     "on" => ["workflow_call"],
-    "jobs" => ["build", "notify-lark"],
+    "jobs" => ["build"],
   },
   ".github/workflows/reusable-cursor-report-dispatch.yml" => {
     "name" => "Reusable Cursor Report Dispatch",
@@ -177,7 +177,9 @@ env "${compose_env[@]}" docker compose -f infra/docker-compose.local.yml -f infr
 
 echo
 echo "=== Validate shell syntax ==="
-bash -n .github/scripts/*.sh scripts/*.sh
+while IFS= read -r script_path; do
+  bash -n "${script_path}"
+done < <(find .github/scripts scripts -maxdepth 1 -type f -name "*.sh" | sort)
 
 echo
 echo "Workflow syntax guard PASS"
