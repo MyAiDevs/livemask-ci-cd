@@ -38,23 +38,4 @@ jobs:
       - name: Production deploy placeholder
         run: |
           echo "Production deployment scripts are not enabled yet."
-          echo "This gate records the versioned production intent and notifies Lark."
-
-  notify-lark:
-    needs: [release-gate]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Notify Lark
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          LARK_BOT_WEBHOOK: ${{ secrets.LARK_BOT_WEBHOOK }}
-          LARK_BOT_SECRET: ${{ secrets.LARK_BOT_SECRET }}
-          WORKFLOW_RESULT: >-
-            ${{
-              contains(needs.*.result, 'failure') && 'failure'
-              || contains(needs.*.result, 'cancelled') && 'cancelled'
-              || 'success'
-            }}
-        run: bash .github/scripts/lark-notify.sh "$WORKFLOW_RESULT"
+          echo "This gate records the versioned production intent."
