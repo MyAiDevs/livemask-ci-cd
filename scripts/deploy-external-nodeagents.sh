@@ -86,7 +86,7 @@ deploy_host() {
     --exclude='dist' \
     --exclude='build' \
     -C "${SOURCE_DIR}" -cf - . | \
-    ssh ${SSH_OPTS} "${host}" "mkdir -p '${REMOTE_DIR}' && tar -C '${REMOTE_DIR}' -xf -"
+    ssh ${SSH_OPTS} "${host}" "mkdir -p '${REMOTE_DIR}' && find '${REMOTE_DIR}' -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -C '${REMOTE_DIR}' -xf -"
 
   ssh ${SSH_OPTS} "${host}" \
     "REMOTE_DIR='${REMOTE_DIR}' CONTAINER='${CONTAINER}' IMAGE='${IMAGE}' VOLUME='${VOLUME}' PORT_ARGS='${PORT_ARGS}' RUN_ARGS='${RUN_ARGS}' sh -s" <<'REMOTE'
