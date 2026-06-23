@@ -115,7 +115,7 @@ services:
     restart: unless-stopped
     environment:
       PUBLIC_PRIMARY_DOMAIN: "${PUBLIC_PRIMARY_DOMAIN:-livemask-vpn.com}"
-      VITE_PREVIEW_ALLOWED_HOSTS: "${VITE_PREVIEW_ALLOWED_HOSTS:-livemask-vpn.com,www.livemask-vpn.com,47.243.128.122,localhost,127.0.0.1}"
+      VITE_PREVIEW_ALLOWED_HOSTS: "${VITE_PREVIEW_ALLOWED_HOSTS:-livemask-vpn.com,www.livemask-vpn.com,livemaskvpn.app,www.livemaskvpn.app,47.243.128.122,localhost,127.0.0.1}"
     ports:
       - "${LIVEMASK_WEBSITE_PORT:-64000}:3000"
     networks:
