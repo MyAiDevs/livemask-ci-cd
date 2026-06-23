@@ -51,7 +51,7 @@ services:
       NODEAGENT_BACKEND_TLS_PORT: "${NODEAGENT_BACKEND_TLS_PORT:-8443}"
       NODEAGENT_BACKEND_TLS_CERT_PATH: "${NODEAGENT_BACKEND_TLS_CERT_PATH:-data/cert/backend.cert.pem}"
       NODEAGENT_BACKEND_TLS_KEY_PATH: "${NODEAGENT_BACKEND_TLS_KEY_PATH:-data/cert/backend.key.pem}"
-      CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-https://admin.livemask-vpn.com,https://www.livemask-vpn.com,https://livemask-vpn.com,http://127.0.0.1:${LIVEMASK_ADMIN_PORT:-64001},http://127.0.0.1:${LIVEMASK_WEBSITE_PORT:-64000}}"
+      CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-https://admin.livemask-vpn.com,https://www.livemask-vpn.com,https://livemask-vpn.com,https://livemaskvpn.app,https://www.livemaskvpn.app,http://127.0.0.1:${LIVEMASK_ADMIN_PORT:-64001},http://127.0.0.1:${LIVEMASK_WEBSITE_PORT:-64000}}"
       PUBLIC_PRIMARY_DOMAIN: "${PUBLIC_PRIMARY_DOMAIN:-}"
       # GeoIP credential encryption. Leave empty unless an operator explicitly
       # provides a runtime secret; Backend fails closed before storing/decrypting
