@@ -14,6 +14,10 @@ on:
         description: Comma-separated mirror apex domains (optional DNS required for certbot)
         required: false
         default: vpn-mirrors.xyz,vpn-mirrors.cfd
+      website_extra_domains:
+        description: Comma-separated Website-only domains, such as App review domains
+        required: false
+        default: ""
       certbot_email:
         description: Let's Encrypt contact email
         required: true
@@ -34,6 +38,7 @@ jobs:
         env:
           PRIMARY_DOMAIN: ${{ inputs.primary_domain }}
           MIRROR_DOMAINS: ${{ inputs.mirror_domains }}
+          WEBSITE_EXTRA_DOMAINS: ${{ inputs.website_extra_domains }}
           CERTBOT_EMAIL: ${{ inputs.certbot_email }}
         run: bash scripts/setup-public-nginx.sh
 
