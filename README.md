@@ -166,7 +166,9 @@ ports above. App review or Website-only hostnames must be passed through
 `WEBSITE_EXTRA_DOMAINS`, for example
 `WEBSITE_EXTRA_DOMAINS=livemaskvpn.app,www.livemaskvpn.app`, so they route to
 the Website vhost before Website site-config decides whether to render the App
-review page.
+review page. The same hostnames must also be present in
+`VITE_PREVIEW_ALLOWED_HOSTS`; if the review page needs login or registration,
+the `https://` origins must be present in Backend `CORS_ALLOWED_ORIGINS`.
 
 Each runtime service can be recreated independently. The dev compose file does
 not use service-level `depends_on` between Backend, Admin, Website, Job Service,
