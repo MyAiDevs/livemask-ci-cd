@@ -40,7 +40,7 @@ jobs:
           MIRROR_DOMAINS: ${{ inputs.mirror_domains }}
           WEBSITE_EXTRA_DOMAINS: ${{ inputs.website_extra_domains }}
           CERTBOT_EMAIL: ${{ inputs.certbot_email }}
-        run: bash scripts/setup-public-nginx.sh
+        run: sudo --preserve-env=PRIMARY_DOMAIN,MIRROR_DOMAINS,WEBSITE_EXTRA_DOMAINS,CERTBOT_EMAIL bash scripts/setup-public-nginx.sh
 
       - name: Verify HTTPS API health
         run: |
