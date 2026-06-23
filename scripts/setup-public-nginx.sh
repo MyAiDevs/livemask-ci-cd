@@ -7,6 +7,7 @@ set -euo pipefail
 
 PRIMARY_DOMAIN="${PRIMARY_DOMAIN:-livemask-vpn.com}"
 MIRROR_DOMAINS="${MIRROR_DOMAINS:-vpn-mirrors.xyz,vpn-mirrors.cfd}"
+WEBSITE_EXTRA_DOMAINS="${WEBSITE_EXTRA_DOMAINS:-}"
 WEBSITE_PORT="${WEBSITE_PORT:-64000}"
 ADMIN_PORT="${ADMIN_PORT:-64001}"
 JOB_PORT="${JOB_PORT:-64002}"
@@ -56,6 +57,52 @@ EOF
   ln -sf "/etc/nginx/sites-available/${name}" "/etc/nginx/sites-enabled/${name}"
 }
 
+append_names() {
+  local current="$1"
+  local raw="$2"
+  local include_www="${3:-false}"
+  IFS=',' read -r -a domains <<< "${raw}"
+  for domain in "${domains[@]}"; do
+    domain="$(echo "${domain}" | xargs)"
+    domain="${domain#http://}"
+    domain="${domain#https://}"
+    domain="${domain%%/*}"
+    domain="${domain%:443}"
+    domain="${domain%:80}"
+    domain="${domain%.}"
+    if [[ -z "${domain}" ]]; then
+      continue
+    fi
+    current+=" ${domain}"
+    if [[ "${include_www}" == "true" && "${domain}" != www.* ]]; then
+      current+=" www.${domain}"
+    fi
+  done
+  echo "${current}"
+}
+
+append_cert_domains() {
+  local raw="$1"
+  local include_www="${2:-false}"
+  IFS=',' read -r -a domains <<< "${raw}"
+  for domain in "${domains[@]}"; do
+    domain="$(echo "${domain}" | xargs)"
+    domain="${domain#http://}"
+    domain="${domain#https://}"
+    domain="${domain%%/*}"
+    domain="${domain%:443}"
+    domain="${domain%:80}"
+    domain="${domain%.}"
+    if [[ -z "${domain}" ]]; then
+      continue
+    fi
+    CERT_DOMAINS+=(-d "${domain}")
+    if [[ "${include_www}" == "true" && "${domain}" != www.* ]]; then
+      CERT_DOMAINS+=(-d "www.${domain}")
+    fi
+  done
+}
+
 API_NAMES="api.${PRIMARY_DOMAIN}"
 WWW_NAMES="www.${PRIMARY_DOMAIN} ${PRIMARY_DOMAIN}"
 IFS=',' read -r -a _mirrors <<< "${MIRROR_DOMAINS}"
@@ -63,6 +110,7 @@ for _m in "${_mirrors[@]}"; do
   API_NAMES+=" api.${_m}"
   WWW_NAMES+=" www.${_m} ${_m}"
 done
+WWW_NAMES="$(append_names "${WWW_NAMES}" "${WEBSITE_EXTRA_DOMAINS}" false)"
 
 write_site livemask-api "${API_NAMES}" "${BACKEND_PORT}"
 write_site livemask-www "${WWW_NAMES}" "${WEBSITE_PORT}"
@@ -84,6 +132,7 @@ IFS=',' read -r -a mirrors <<< "${MIRROR_DOMAINS}"
 for m in "${mirrors[@]}"; do
   CERT_DOMAINS+=(-d "api.${m}" -d "${m}" -d "www.${m}")
 done
+append_cert_domains "${WEBSITE_EXTRA_DOMAINS}" false
 
 certbot --nginx "${CERT_DOMAINS[@]}" --non-interactive --agree-tos -m "${EMAIL}" --redirect || true
 

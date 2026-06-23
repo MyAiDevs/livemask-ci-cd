@@ -162,7 +162,11 @@ host ports:
 
 Regenerate nginx with `scripts/setup-public-nginx.sh` after port changes. The
 script writes `api`, `www`, `admin`, and `job` vhosts and proxies them to the
-ports above.
+ports above. App review or Website-only hostnames must be passed through
+`WEBSITE_EXTRA_DOMAINS`, for example
+`WEBSITE_EXTRA_DOMAINS=livemaskvpn.app,www.livemaskvpn.app`, so they route to
+the Website vhost before Website site-config decides whether to render the App
+review page.
 
 Each runtime service can be recreated independently. The dev compose file does
 not use service-level `depends_on` between Backend, Admin, Website, Job Service,
