@@ -230,3 +230,27 @@ LIVEMASK_SMOKE_URL=https://staging.example.com bash scripts/smoke.sh
 Replace the placeholder nginx service with real LiveMask backend, admin,
 website, app support services, Redis, and database services as those deployment
 artifacts become available.
+
+## 重要：种子数据脚本必须手动执行
+
+**不要在 GitHub Actions workflow 中自动执行 seed 脚本。** 每次 push 到 dev
+触发自动部署时，如果自动执行 seed，会覆盖服务器上的生产数据（用户密码、配置等）。
+
+### 需要种子数据时，必须 SSH 登录到服务器手动执行：
+
+```bash
+# SSH 登录到 staging 服务器
+ssh root@47.243.128.122
+
+# 进入 ci-cd 目录
+cd /path/to/livemask-ci-cd
+
+# 根据需要执行对应的种子脚本
+bash scripts/seed-dev-test-data.sh          # 开发测试数据（用户/角色）
+bash scripts/seed-auth-roles.sh             # 角色数据
+bash scripts/seed-billing-plans.sh          # 计费套餐
+bash scripts/seed-config-center-defaults.sh # 配置中心默认值
+bash scripts/seed-site-config.sh            # 站点配置
+```
+
+**规则**：所有 `seed-*.sh` 脚本都会修改数据库状态，不允许在 CI/CD pipeline 中自动运行。
