@@ -35,7 +35,9 @@ services:
     image: ${BACKEND_GO_IMAGE:-golang:1.25-alpine}
     working_dir: /workspace/livemask-backend
     restart: unless-stopped
-    command: ["sh", "-lc", "${BACKEND_COMMAND:-/usr/local/go/bin/go run .}"]
+    # sing-box is installed before boot so the GeoIP service can compile imported
+    # geosite-cn suffix rules into .srs locally, matching the deployed runtime.
+    command: ["sh", "-lc", "apk add --no-cache wget tar >/dev/null 2>&1 || true; command -v sing-box >/dev/null 2>&1 || { ver=${SINGBOX_VERSION:-1.13.0}; ver=$${ver#v}; arch=$$(apk --print-arch); case $$arch in x86_64) sb=amd64;; aarch64) sb=arm64;; *) sb=amd64;; esac; wget -q https://github.com/SagerNet/sing-box/releases/download/v$${ver}/sing-box-$${ver}-linux-$${sb}-musl.tar.gz -O /tmp/sing-box.tgz && tar -xzf /tmp/sing-box.tgz -C /tmp && install -m0755 /tmp/sing-box-$${ver}-linux-$${sb}-musl/sing-box /usr/local/bin/sing-box && sing-box version; }; ${BACKEND_COMMAND:-/usr/local/go/bin/go run .}"]
     environment:
       PORT: "8080"
       DB_DSN: "${DB_DSN:-postgres://${POSTGRES_USER:-livemask}:${POSTGRES_PASSWORD:-livemask}@postgres:5432/${POSTGRES_DB:-livemask}?sslmode=disable}"
