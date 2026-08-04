@@ -233,8 +233,14 @@ artifacts become available.
 
 ## 重要：种子数据脚本必须手动执行
 
-**不要在 GitHub Actions workflow 中自动执行 seed 脚本。** 每次 push 到 dev
-触发自动部署时，如果自动执行 seed，会覆盖服务器上的生产数据（用户密码、配置等）。
+**不要在 GitHub Actions workflow 中自动执行 seed 脚本。** Backend / Admin /
+Website 通过 GitHub Actions 更新线上代码时，`dev-runtime-deploy` **不会**、也
+**不得**调用 `scripts/seed-dev-test-data.sh`。`scripts/assert-no-auto-user-seed.sh`
+会在 workflow syntax guard 中拦截重新引入。
+
+`seed-dev-test-data.sh` 默认是非破坏性的：已存在用户保留密码，已存在订阅保留
+套餐与账期。只有显式设置 `SEED_RESET_PASSWORDS=1` /
+`SEED_RESET_SUBSCRIPTIONS=1` 才会覆盖。
 
 ### 需要种子数据时，必须 SSH 登录到服务器手动执行：
 
@@ -245,7 +251,7 @@ ssh root@47.243.128.122
 # 进入 ci-cd 目录
 cd /path/to/livemask-ci-cd
 
-# 根据需要执行对应的种子脚本
+# 根据需要执行对应的种子脚本（默认不覆盖已有密码/订阅）
 bash scripts/seed-dev-test-data.sh          # 开发测试数据（用户/角色）
 bash scripts/seed-auth-roles.sh             # 角色数据
 bash scripts/seed-billing-plans.sh          # 计费套餐

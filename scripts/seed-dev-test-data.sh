@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# Manual QA / bootstrap seed only.
+# NEVER invoke from GitHub Actions deploy (see scripts/assert-no-auto-user-seed.sh).
+#
+# Default behavior is non-destructive for existing rows:
+# - existing users keep password_hash (set SEED_RESET_PASSWORDS=1 to overwrite)
+# - existing subscriptions keep plan/period (set SEED_RESET_SUBSCRIPTIONS=1 to overwrite)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,6 +13,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 COMPOSE_FILE="${COMPOSE_FILE:-infra/docker-compose.staging.yml}"
 POSTGRES_USER="${POSTGRES_USER:-livemask}"
 POSTGRES_DB="${POSTGRES_DB:-livemask}"
+SEED_RESET_PASSWORDS="${SEED_RESET_PASSWORDS:-0}"
+SEED_RESET_SUBSCRIPTIONS="${SEED_RESET_SUBSCRIPTIONS:-0}"
 
 if [[ "${COMPOSE_FILE}" != /* ]]; then
   COMPOSE_FILE="${REPO_ROOT}/${COMPOSE_FILE}"
@@ -68,14 +76,19 @@ seed_user() {
     values_sql+="('${role}')"
   done
 
+  local password_update_sql="password_hash = users.password_hash"
+  if [[ "${SEED_RESET_PASSWORDS}" == "1" ]]; then
+    password_update_sql="password_hash = EXCLUDED.password_hash"
+  fi
+
   pg_exec <<SQL
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 WITH upserted AS (
   INSERT INTO users (email, password_hash, display_name, status, email_verified_at)
   VALUES ('${email_sql}', crypt('${password_sql}', gen_salt('bf', 12)), '${display_sql}', 'active', NOW())
   ON CONFLICT (email) DO UPDATE
-    SET password_hash = EXCLUDED.password_hash,
-        display_name = EXCLUDED.display_name,
+    SET ${password_update_sql},
+        display_name = COALESCE(NULLIF(users.display_name, ''), EXCLUDED.display_name),
         status = 'active',
         email_verified_at = COALESCE(users.email_verified_at, NOW()),
         updated_at = NOW()
@@ -137,6 +150,17 @@ SQL
 echo "[seed-dev-test-data] seeding auth role catalog"
 seed_auth_roles
 
+if [[ "${SEED_RESET_PASSWORDS}" == "1" ]]; then
+  echo "[seed-dev-test-data] WARNING: SEED_RESET_PASSWORDS=1 — existing seeded user passwords will be overwritten"
+else
+  echo "[seed-dev-test-data] preserving existing user passwords (SEED_RESET_PASSWORDS=0)"
+fi
+if [[ "${SEED_RESET_SUBSCRIPTIONS}" == "1" ]]; then
+  echo "[seed-dev-test-data] WARNING: SEED_RESET_SUBSCRIPTIONS=1 — existing seeded subscriptions will be overwritten"
+else
+  echo "[seed-dev-test-data] preserving existing subscriptions (SEED_RESET_SUBSCRIPTIONS=0)"
+fi
+
 echo "[seed-dev-test-data] seeding dev users"
 seed_user "${DEV_ADMIN_EMAIL:-admin@livemask.dev}" "${DEV_ADMIN_PASSWORD:-AdminPass123!}" "Dev Admin" admin
 seed_user "${DEV_SPONSOR_EMAIL:-sponsor@livemask.dev}" "${DEV_SPONSOR_PASSWORD:-SponsorPass123!}" "Dev Sponsor Ambassador" user sponsor_ambassador
@@ -148,6 +172,20 @@ dev_user_email_sql="$(sql_escape "${DEV_USER_EMAIL:-user@livemask.dev}")"
 dev_subscriber_email_sql="$(sql_escape "${DEV_SUBSCRIBER_EMAIL:-subscriber@livemask.dev}")"
 dev_sponsor_email_sql="$(sql_escape "${DEV_SPONSOR_EMAIL:-sponsor@livemask.dev}")"
 dev_ambassador_email_sql="$(sql_escape "${DEV_AMBASSADOR_EMAIL:-ambassador@livemask.dev}")"
+
+subscription_conflict_sql="DO NOTHING"
+if [[ "${SEED_RESET_SUBSCRIPTIONS}" == "1" ]]; then
+  subscription_conflict_sql="$(cat <<'SQL'
+DO UPDATE
+SET plan_id = EXCLUDED.plan_id,
+    status = 'active',
+    current_period_start = EXCLUDED.current_period_start,
+    current_period_end = EXCLUDED.current_period_end,
+    cancel_at_period_end = FALSE,
+    updated_at = NOW()
+SQL
+)"
+fi
 
 echo "[seed-dev-test-data] seeding dev billing plans and subscriptions"
 pg_exec <<SQL
@@ -203,13 +241,7 @@ SELECT
   NOW() + INTERVAL '30 days',
   FALSE
 FROM seed_users
-ON CONFLICT (user_id) DO UPDATE
-SET plan_id = EXCLUDED.plan_id,
-    status = 'active',
-    current_period_start = EXCLUDED.current_period_start,
-    current_period_end = EXCLUDED.current_period_end,
-    cancel_at_period_end = FALSE,
-    updated_at = NOW();
+ON CONFLICT (user_id) ${subscription_conflict_sql};
 SQL
 
 echo "[seed-dev-test-data] seeding dev NodeAgent release compatibility labels"
