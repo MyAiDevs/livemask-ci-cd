@@ -182,4 +182,8 @@ while IFS= read -r script_path; do
 done < <(find .github/scripts scripts -maxdepth 1 -type f -name "*.sh" | sort)
 
 echo
+echo "=== Guard: deploy must not auto-seed user test data ==="
+bash scripts/assert-no-auto-user-seed.sh
+
+echo
 echo "Workflow syntax guard PASS"
